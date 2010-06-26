@@ -472,6 +472,8 @@ Player::Player (WorldSession *session): Unit(), m_achievementMgr(this), m_reputa
     m_GuildIdInvited = 0;
     m_ArenaTeamIdInvited = 0;
 
+    m_faction = 0;
+
     m_atLoginFlags = AT_LOGIN_NONE;
 
     mSemaphoreTeleport_Near = false;
@@ -6221,10 +6223,110 @@ uint32 Player::getFactionForRace(uint8 race)
     return rEntry->FactionID;
 }
 
+/**
+ * Gets the opposite race of the given race
+ *
+ * @param race the race to get the opposite of
+ * @returns the opposite race
+ *
+ */
+uint8 Player::getOppositeRace(uint8 race)
+{
+    switch(race)
+    {
+        case RACE_HUMAN         : return RACE_ORC;
+        case RACE_ORC           : return RACE_HUMAN;
+        case RACE_DWARF         : return RACE_UNDEAD_PLAYER;
+        case RACE_UNDEAD_PLAYER : return RACE_DWARF;
+        case RACE_NIGHTELF      : return RACE_TAUREN;
+        case RACE_TAUREN        : return RACE_NIGHTELF;
+        case RACE_GNOME         : return RACE_TROLL;
+        case RACE_TROLL         : return RACE_GNOME;
+        case RACE_DRAENEI       : return RACE_BLOODELF;
+        case RACE_BLOODELF      : return RACE_DRAENEI;
+    }
+
+    sLog.outError("Race %u not found", uint32(race));
+    return RACE_HUMAN;
+}
+
+/**
+ * Changes the player's faction and notifies
+ *
+ * @param race the race of the player
+ *
+ */
+void Player::changeFactionToOpposite(uint8 race)
+{
+    uint8 raceto;
+
+    // determine which race to use as a base
+    if (IsTraitor())
+        raceto = race;
+    else
+        raceto = getOppositeRace(race);
+
+    // set reputation to base defaults for current race
+    m_reputationMgr.SetBaseDefaults();
+
+    // change race faction and team
+    m_faction = getFactionForRace( raceto );
+    setFactionForRace( race );
+
+    // set reputation to base defaults for new race faction
+    m_reputationMgr.SetBaseDefaults();
+
+    // send reputation to client to allow it properly work without a relogin
+    m_reputationMgr.SendInitialReputations();
+    m_reputationMgr.SendStates();
+
+    // add team languages
+    // although client doesn't allow them to be used
+    if(!IsInWorld())
+    {
+        addSpell(668, true, true, true, false);
+        addSpell(669, true, true, true, false);
+    }
+    else
+    {
+        learnSpell(668, true);
+        learnSpell(669, true);
+    }
+
+    DEBUG_LOG("PLAYER changed to opposite (Class: %u Race: %u)", uint32(getClass()), uint32(raceto));
+
+    // build message to let everyone know
+    std::string strmessage = GetName();
+    if (IsTraitor())
+        strmessage += " is a traitor and switched to the ";
+    else
+        strmessage += " is a double traitor and switched back to the ";
+
+    if (GetTeam() == ALLIANCE)
+        strmessage += "Alliance";
+    else
+        strmessage += "Horde";
+    strmessage += "!";
+
+    // send messages to all players and current player
+    sWorld.SendServerMessage(SERVER_MSG_STRING, strmessage.c_str());
+    sWorld.SendServerMessage(SERVER_MSG_STRING, "You are a traitor! Your reputation has been lost with your people.", this);
+}
+
 void Player::setFactionForRace(uint8 race)
 {
-    m_team = TeamForRace(race);
-    setFaction( getFactionForRace(race) );
+    uint8 temprace;
+    temprace = race;
+
+    // Does the faction match for the given race; IsTraitor
+    if ( (m_faction != 0) && (m_faction != getFactionForRace(race)) )
+    {
+        temprace = getOppositeRace(race);
+    }
+
+    m_team = TeamForRace(temprace);
+    m_faction = getFactionForRace(temprace);
+    setFaction( m_faction );
 }
 
 ReputationRank Player::GetReputationRank(uint32 faction) const
@@ -14942,8 +15044,8 @@ bool Player::LoadFromDB( uint32 guid, SqlQueryHolder *holder )
     //"resettalents_time, trans_x, trans_y, trans_z, trans_o, transguid, extra_flags, stable_slots, at_login, zone, online, death_expire_time, taxi_path, dungeon_difficulty,"
     // 39           40                41                42                    43          44          45              46           47               48              49
     //"arenaPoints, totalHonorPoints, todayHonorPoints, yesterdayHonorPoints, totalKills, todayKills, yesterdayKills, chosenTitle, knownCurrencies, watchedFaction, drunk,"
-    // 50      51      52      53      54      55      56      57      58         59          60             61              62      63           64
-    //"health, power1, power2, power3, power4, power5, power6, power7, specCount, activeSpec, exploredZones, equipmentCache, ammoId, knownTitles, actionBars  FROM characters WHERE guid = '%u'", GUID_LOPART(m_guid));
+    // 50      51      52      53      54      55      56      57      58         59          60             61              62      63           64          65
+    //"health, power1, power2, power3, power4, power5, power6, power7, specCount, activeSpec, exploredZones, equipmentCache, ammoId, knownTitles, actionBars, faction  FROM characters WHERE guid = '%u'", GUID_LOPART(m_guid));
     QueryResult *result = holder->GetResult(PLAYER_LOGIN_QUERY_LOADFROM);
 
     if(!result)
@@ -15034,6 +15136,7 @@ bool Player::LoadFromDB( uint32 guid, SqlQueryHolder *holder )
 
     //Need to call it to initialize m_team (m_team can be calculated from race)
     //Other way is to saves m_team into characters table.
+    m_faction = fields[65].GetUInt32();
     setFactionForRace(getRace());
     SetCharm(NULL);
 
@@ -16634,7 +16737,7 @@ void Player::SaveToDB()
         "trans_x, trans_y, trans_z, trans_o, transguid, extra_flags, stable_slots, at_login, zone, "
         "death_expire_time, taxi_path, arenaPoints, totalHonorPoints, todayHonorPoints, yesterdayHonorPoints, totalKills, "
         "todayKills, yesterdayKills, chosenTitle, knownCurrencies, watchedFaction, drunk, health, power1, power2, power3, "
-        "power4, power5, power6, power7, specCount, activeSpec, exploredZones, equipmentCache, ammoId, knownTitles, actionBars) VALUES ("
+        "power4, power5, power6, power7, specCount, activeSpec, exploredZones, equipmentCache, ammoId, knownTitles, actionBars, faction) VALUES ("
         << GetGUIDLow() << ", "
         << GetSession()->GetAccountId() << ", '"
         << sql_name << "', "
@@ -16756,6 +16859,9 @@ void Player::SaveToDB()
     }
     ss << "',";
     ss << uint32(GetByteValue(PLAYER_FIELD_BYTES, 2));
+
+    ss << ",";
+    ss << uint32(m_faction);
     ss << ")";
 
     CharacterDatabase.Execute( ss.str().c_str() );

@@ -3031,13 +3031,13 @@ void Aura::HandleAuraModShapeshift(bool apply, bool Real)
         {
             // players are a bit difficult since the dbc has seldomly an horde modelid
             // so we add hacks here to set the right model
-            if (Player::TeamForRace(target->getRace()) == ALLIANCE)
+            if (((Player*)target)->GetTeam() == ALLIANCE)
                 modelid = ssEntry->modelID_A;
             else                                            // 3.2.3 only the moonkin form has this information
                 modelid = ssEntry->modelID_H;
 
             // no model found, if player is horde we look here for our hardcoded modelids
-            if (!modelid && Player::TeamForRace(target->getRace()) == HORDE)
+            if (!modelid && ((Player*)target)->GetTeam() == HORDE)
             {
 
                 switch(form)

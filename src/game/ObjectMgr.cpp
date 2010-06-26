@@ -1542,16 +1542,20 @@ uint32 ObjectMgr::GetPlayerTeamByGUID(const uint64 &guid) const
     // prevent DB access for online player
     if(Player* player = GetPlayer(guid))
     {
-        return Player::TeamForRace(player->getRace());
+        return player->GetTeam();
     }
 
-    QueryResult *result = CharacterDatabase.PQuery("SELECT race FROM characters WHERE guid = '%u'", GUID_LOPART(guid));
+    QueryResult *result = CharacterDatabase.PQuery("SELECT race, faction FROM characters WHERE guid = '%u'", GUID_LOPART(guid));
 
     if(result)
     {
         uint8 race = (*result)[0].GetUInt8();
+        uint8 faction = (*result)[1].GetUInt32();
         delete result;
-        return Player::TeamForRace(race);
+        if ( (faction != 0) && (faction != Player::getFactionForRace(race)) )
+            return Player::TeamForRace(Player::getOppositeRace(race));
+        else
+            return Player::TeamForRace(race);
     }
 
     return 0;

@@ -134,6 +134,7 @@ class ChatHandler
         bool HandleCharacterLevelCommand(const char* args);
         bool HandleCharacterRenameCommand(const char * args);
         bool HandleCharacterReputationCommand(const char* args);
+        bool HandleCharacterSwitchTeamCommand(const char* args);
         bool HandleCharacterTitlesCommand(const char* args);
 
         bool HandleDebugAnimCommand(const char* args);
