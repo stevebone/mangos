@@ -375,7 +375,7 @@ Aura::Aura(SpellEntry const* spellproto, SpellEffectIndex eff, int32 *currentBas
 m_spellmod(NULL),
 m_timeCla(1000), m_periodicTimer(0), m_periodicTick(0), m_removeMode(AURA_REMOVE_BY_DEFAULT),
 m_effIndex(eff), m_spellAuraHolder(holder), m_isPersistent(false),
-m_positive(false), m_isPeriodic(false), m_isAreaAura(false), m_in_use(0), m_deleted(false)
+m_positive(false), m_isPeriodic(false), m_isAreaAura(false), m_in_use(0)
 {
     ASSERT(target);
 
@@ -1948,6 +1948,16 @@ void Aura::HandleAuraDummy(bool apply, bool Real)
                         m_modifier.periodictime = 30*IN_MILLISECONDS;
                         m_periodicTimer = m_modifier.periodictime;
                         return;
+                    case 31606:                             // Stormcrow Amulet
+                    {
+                        CreatureInfo const * cInfo = ObjectMgr::GetCreatureTemplate(17970);
+
+                        // we must assume db or script set display id to native at ending flight (if not, target is stuck with this model)
+                        if (cInfo)
+                            target->SetDisplayId(Creature::ChooseDisplayId(0, cInfo));
+
+                        return;
+                    }
                     case 13139:                             // net-o-matic
                         // root to self part of (root_target->charge->root_self sequence
                         if (Unit* caster = GetCaster())
@@ -1992,6 +2002,10 @@ void Aura::HandleAuraDummy(bool apply, bool Real)
                             // not use ammo and not allow use
                             ((Player*)target)->RemoveAmmo();
                         return;
+                    case 47190:                             // Toalu'u's Spiritual Incense
+                        target->CastSpell(target, 47189, true, NULL, this);
+                        // allow script to process further (text)
+                        break;
                     case 48025:                             // Headless Horseman's Mount
                         Spell::SelectMountByAreaAndSkill(target, 51621, 48024, 51617, 48023, 0);
                         return;
@@ -2646,7 +2660,7 @@ void Aura::HandleAuraMounted(bool apply, bool Real)
         if (target->GetTypeId()==TYPEID_PLAYER)
             team = ((Player*)target)->GetTeam();
 
-        uint32 display_id = sObjectMgr.ChooseDisplayId(team,ci);
+        uint32 display_id = Creature::ChooseDisplayId(team,ci);
         CreatureModelInfo const *minfo = sObjectMgr.GetCreatureModelRandomGender(display_id);
         if (minfo)
             display_id = minfo->modelid;
@@ -3076,7 +3090,7 @@ void Aura::HandleAuraTransform(bool apply, bool Real)
                 sLog.outError("Auras: unknown creature id = %d (only need its modelid) Form Spell Aura Transform in Spell ID = %d", m_modifier.m_miscvalue, GetId());
             }
             else
-                model_id = ci->DisplayID_A[0];              // Will use the default model here
+                model_id = Creature::ChooseDisplayId(0,ci); // Will use the default model here
 
             // Polymorph (sheep/penguin case)
             if (GetSpellProto()->SpellFamilyName == SPELLFAMILY_MAGE && GetSpellProto()->SpellIconID == 82)
@@ -3152,7 +3166,7 @@ void Aura::HandleAuraTransform(bool apply, bool Real)
                     if (target->GetTypeId() == TYPEID_PLAYER)
                         team = ((Player*)target)->GetTeam();
 
-                    uint32 display_id = sObjectMgr.ChooseDisplayId(team, ci);
+                    uint32 display_id = Creature::ChooseDisplayId(team, ci);
                     CreatureModelInfo const *minfo = sObjectMgr.GetCreatureModelRandomGender(display_id);
                     if (minfo)
                         display_id = minfo->modelid;
@@ -6917,44 +6931,9 @@ void Aura::PeriodicDummyTick()
     switch (spell->SpellFamilyName)
     {
         case SPELLFAMILY_GENERIC:
+        {
             switch (spell->Id)
             {
-                // Drink
-                case 430:
-                case 431:
-                case 432:
-                case 1133:
-                case 1135:
-                case 1137:
-                case 10250:
-                case 22734:
-                case 27089:
-                case 34291:
-                case 43182:
-                case 43183:
-                case 43706:
-                case 46755:
-                case 49472: // Drink Coffee
-                case 57073:
-                case 61830:
-                {
-                    if (target->GetTypeId() != TYPEID_PLAYER)
-                        return;
-                    // Search SPELL_AURA_MOD_POWER_REGEN aura for this spell and add bonus
-                    Unit::AuraList const& aura = target->GetAurasByType(SPELL_AURA_MOD_POWER_REGEN);
-                    for(Unit::AuraList::const_iterator i = aura.begin(); i != aura.end(); ++i)
-                    {
-                        if ((*i)->GetId() == GetId())
-                        {
-                            (*i)->GetModifier()->m_amount = m_modifier.m_amount;
-                            ((Player*)target)->UpdateManaRegen();
-                            // Disable continue
-                            m_isPeriodic = false;
-                            return;
-                        }
-                    }
-                    return;
-                }
                 // Forsaken Skills
                 case 7054:
                 {
@@ -7184,6 +7163,24 @@ void Aura::PeriodicDummyTick()
                 default:
                     break;
             }
+
+            // Drink (item drink spells)
+            if (GetEffIndex() > EFFECT_INDEX_0 && spell->EffectApplyAuraName[GetEffIndex()-1] == SPELL_AURA_MOD_POWER_REGEN)
+            {
+                if (target->GetTypeId() != TYPEID_PLAYER)
+                    return;
+                // Search SPELL_AURA_MOD_POWER_REGEN aura for this spell and add bonus
+                if (Aura* aura = GetHolder()->GetAuraByEffectIndex(SpellEffectIndex(GetEffIndex() - 1)))
+                {
+                    aura->GetModifier()->m_amount = m_modifier.m_amount;
+                    ((Player*)target)->UpdateManaRegen();
+                    // Disable continue
+                    m_isPeriodic = false;
+                    return;
+                }
+                return;
+            }
+
             // Prey on the Weak
             if (spell->SpellIconID == 2983)
             {
@@ -7200,6 +7197,7 @@ void Aura::PeriodicDummyTick()
                     target->RemoveAurasDueToSpell(58670);
             }
             break;
+        }
         case SPELLFAMILY_MAGE:
         {
             // Mirror Image
@@ -7737,12 +7735,9 @@ void SpellAuraHolder::RemoveAura(SpellEffectIndex index)
 
 void SpellAuraHolder::ApplyAuraModifiers(bool apply, bool real)
 {
-    for (int32 i = 0; i < MAX_EFFECT_INDEX; ++i)
-    {
-        Aura *aur = GetAuraByEffectIndex(SpellEffectIndex(i));
-        if (aur)
+    for (int32 i = 0; i < MAX_EFFECT_INDEX && !IsDeleted(); ++i)
+        if (Aura *aur = GetAuraByEffectIndex(SpellEffectIndex(i)))
             aur->ApplyModifier(apply, real);
-    }
 }
 
 void SpellAuraHolder::_AddSpellAuraHolder()
@@ -7968,7 +7963,7 @@ void SpellAuraHolder::_RemoveSpellAuraHolder()
         if(caster && caster->GetTypeId() == TYPEID_PLAYER)
         {
             if ( GetSpellProto()->Attributes & SPELL_ATTR_DISABLED_WHILE_ACTIVE )
-                // note: item based cooldowns and cooldown spell mods with charges ignored (unknown existed cases)
+                // note: item based cooldowns and cooldown spell mods with charges ignored (unknown existing cases)
                 ((Player*)caster)->SendCooldownEvent(GetSpellProto());
         }
     }
@@ -8719,11 +8714,11 @@ void SpellAuraHolder::HandleSpellSpecificBoosts(bool apply)
         if (spellId1)
             m_target->CastSpell(m_target, spellId1, true, NULL, NULL, GetCasterGUID());
         if (spellId2 && !IsDeleted())
-            m_target->CastSpell(m_target, spellId1, true, NULL, NULL, GetCasterGUID());
+            m_target->CastSpell(m_target, spellId2, true, NULL, NULL, GetCasterGUID());
         if (spellId3 && !IsDeleted())
-            m_target->CastSpell(m_target, spellId1, true, NULL, NULL, GetCasterGUID());
+            m_target->CastSpell(m_target, spellId3, true, NULL, NULL, GetCasterGUID());
         if (spellId4 && !IsDeleted())
-            m_target->CastSpell(m_target, spellId1, true, NULL, NULL, GetCasterGUID());
+            m_target->CastSpell(m_target, spellId4, true, NULL, NULL, GetCasterGUID());
     }
     else
     {
