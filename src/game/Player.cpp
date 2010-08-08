@@ -18761,6 +18761,31 @@ bool Player::BuyItemFromVendorSlot(uint64 vendorguid, uint32 vendorslot, uint32 
             return false;
         }
 
+        // check that requirements for mounts are met
+        if ( pProto->Class == ITEM_CLASS_MISC && pProto->SubClass == 5 )
+        {
+            // has required class or race
+            if ( (pProto->AllowableClass & getClassMask()) == 0 || (pProto->AllowableRace & getRaceMask()) == 0 )
+            {
+                SendEquipError( EQUIP_ERR_YOU_CAN_NEVER_USE_THAT_ITEM, NULL, NULL, item );
+                return false;
+            }
+
+            // has required level
+            if ( getLevel() < pProto->RequiredLevel )
+            {
+                SendEquipError( EQUIP_ERR_CANT_EQUIP_LEVEL_I, NULL, NULL, item );
+                return false;
+            }
+
+            // has required skill
+            if ( GetSkillValue(pProto->RequiredSkill) < pProto->RequiredSkillRank )
+            {
+                SendEquipError( EQUIP_ERR_CANT_EQUIP_SKILL, NULL, NULL, item );
+                return false;
+            }
+        }
+
         ModifyMoney( -(int32)price );
         if (uint32 extendedCostId = crItem->ExtendedCost)
         {
@@ -18788,6 +18813,16 @@ bool Player::BuyItemFromVendorSlot(uint64 vendorguid, uint32 vendorslot, uint32 
             GetSession()->SendPacket(&data);
 
             SendNewItem(it, pProto->BuyCount*count, true, false, false);
+
+            // special handling for traitors buying a mount, just teach it
+            if ( IsTraitor() && pProto->Class == ITEM_CLASS_MISC && pProto->SubClass == 5 )
+            {
+                if ( !HasSpell(pProto->Spells[1].SpellId) )
+                {
+                    MoveItemFromInventory( it->GetBagSlot(),it->GetSlot(), false );
+                    learnSpell( pProto->Spells[1].SpellId, false );
+                }
+            }
         }
     }
     else if (IsEquipmentPos(bag, slot))

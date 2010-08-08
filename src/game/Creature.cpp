@@ -768,7 +768,7 @@ bool Creature::isCanTrainingOf(Player* pPlayer, bool msg) const
             }
             break;
         case TRAINER_TYPE_MOUNTS:
-            if(GetCreatureInfo()->trainer_race && pPlayer->getRace() != GetCreatureInfo()->trainer_race)
+            if(GetCreatureInfo()->trainer_race && pPlayer->getRace() != GetCreatureInfo()->trainer_race && !pPlayer->IsTraitor())
             {
                 if(msg)
                 {
