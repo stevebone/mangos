@@ -4038,7 +4038,7 @@ bool ChatHandler::HandleCharacterSwitchTeamCommand(char* args)
     Player* target;
     uint64 target_guid;
     std::string target_name;
-    if(!extractPlayerTarget((char*)args,&target,&target_guid,&target_name))
+    if(!ExtractPlayerTarget(&args, &target, &target_guid, &target_name))
         return false;
 
     if(target)
