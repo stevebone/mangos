@@ -84,6 +84,36 @@ pkgdata_DATA = \
 	10365_01_mangos_creature_ai_scripts.sql \
 	10381_01_mangos_creature_model_race.sql \
 	10400_01_mangos_mangos_string.sql \
+	10409_01_mangos_spell_chain.sql \
+	10409_02_mangos_spell_proc_event.sql \
+	10410_01_mangos_spell_chain.sql \
+	10411_01_mangos_spell_proc_event.sql \
+	10416_01_mangos_spell_proc_event.sql \
+	10419_01_mangos_spell_chain.sql \
+	10422_01_mangos_spell_proc_event.sql \
+	10423_01_mangos_spell_chain.sql \
+	10427_01_mangos_spell_proc_event.sql \
+	10430_01_mangos_spell_chain.sql \
+	10454_01_mangos_spell_proc_event.sql \
+	10457_01_mangos_spell_proc_event.sql \
+	10500_01_mangos_scripts.sql \
+	10503_01_characters_creature_respawn.sql \
+	10503_02_characters_gameobject_respawn.sql \
+	10503_03_mangos_creature_respawn.sql \
+	10503_04_mangos_gameobject_respawn.sql \
+	10537_01_mangos_command.sql \
+	10551_01_mangos_spell_proc_event.sql \
+	10568_01_characters_character_tutorial.sql \
+	10582_01_mangos_spell_proc_event.sql \
+	10604_01_mangos_spell_proc_event.sql \
+	10621_01_mangos_quest_template.sql \
+	10628_01_mangos_mangos_string.sql \
+	10629_01_mangos_mangos_string.sql \
+	10654_01_mangos_game_event_creature_quest.sql \
+	10655_01_characters_character_queststatus_monthly.sql \
+	10660_01_mangos_game_event_quest.sql \
+	10662_01_characters_item_loot.sql \
+	10664_01_characters_arena_team_stats.sql \
 	README
 
 ## Additional files to include when running 'make dist'
@@ -148,4 +178,34 @@ EXTRA_DIST = \
 	10365_01_mangos_creature_ai_scripts.sql \
 	10381_01_mangos_creature_model_race.sql \
 	10400_01_mangos_mangos_string.sql \
+	10409_01_mangos_spell_chain.sql \
+	10409_02_mangos_spell_proc_event.sql \
+	10410_01_mangos_spell_chain.sql \
+	10411_01_mangos_spell_proc_event.sql \
+	10416_01_mangos_spell_proc_event.sql \
+	10419_01_mangos_spell_chain.sql \
+	10422_01_mangos_spell_proc_event.sql \
+	10423_01_mangos_spell_chain.sql \
+	10427_01_mangos_spell_proc_event.sql \
+	10430_01_mangos_spell_chain.sql \
+	10454_01_mangos_spell_proc_event.sql \
+	10457_01_mangos_spell_proc_event.sql \
+	10500_01_mangos_scripts.sql \
+	10503_01_characters_creature_respawn.sql \
+	10503_02_characters_gameobject_respawn.sql \
+	10503_03_mangos_creature_respawn.sql \
+	10503_04_mangos_gameobject_respawn.sql \
+	10537_01_mangos_command.sql \
+	10551_01_mangos_spell_proc_event.sql \
+	10568_01_characters_character_tutorial.sql \
+	10582_01_mangos_spell_proc_event.sql \
+	10604_01_mangos_spell_proc_event.sql \
+	10621_01_mangos_quest_template.sql \
+	10628_01_mangos_mangos_string.sql \
+	10629_01_mangos_mangos_string.sql \
+	10654_01_mangos_game_event_creature_quest.sql \
+	10655_01_characters_character_queststatus_monthly.sql \
+	10660_01_mangos_game_event_quest.sql \
+	10662_01_characters_item_loot.sql \
+	10664_01_characters_arena_team_stats.sql \
 	README

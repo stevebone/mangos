@@ -20,6 +20,7 @@
 
 #include "SpellAuraDefines.h"
 #include "DBCEnums.h"
+#include "ObjectGuid.h"
 
 struct Modifier
 {
@@ -58,8 +59,8 @@ class MANGOS_DLL_SPEC SpellAuraHolder
         void setDiminishGroup(DiminishingGroup group) { m_AuraDRGroup = group; }
         DiminishingGroup getDiminishGroup() const { return m_AuraDRGroup; }
 
-        uint8 GetStackAmount() { return m_stackAmount; }
-        void SetStackAmount(uint8 stackAmount);
+        uint32 GetStackAmount() { return m_stackAmount; }
+        void SetStackAmount(uint32 stackAmount);
         bool ModStackAmount(int32 num); // return true if last charge dropped
 
         Aura* GetAuraByEffectIndex(SpellEffectIndex index) const { return m_auras[index]; }
@@ -80,6 +81,7 @@ class MANGOS_DLL_SPEC SpellAuraHolder
         bool IsDeathPersistent() const { return m_isDeathPersist; }
         bool IsPersistent() const;
         bool IsPositive() const;
+        bool IsAreaAura() const;                            // if one from auras of holder applied as area aura
         bool IsWeaponBuffCoexistableWith(SpellAuraHolder* ref);
         bool IsNeedVisibleSlot(Unit const* caster) const;
         bool IsRemovedOnShapeLost() const { return m_isRemovedOnShapeLost; }
@@ -360,7 +362,6 @@ class MANGOS_DLL_SPEC Aura
         void HandlePhase(bool Apply, bool Real);
         void HandleModTargetArmorPct(bool Apply, bool Real);
         void HandleAuraModAllCritChance(bool Apply, bool Real);
-        void HandleAllowOnlyAbility(bool Apply, bool Real);
         void HandleAuraOpenStable(bool apply, bool Real);
 
         virtual ~Aura();
@@ -374,7 +375,8 @@ class MANGOS_DLL_SPEC Aura
         SpellEntry const* GetSpellProto() const { return GetHolder()->GetSpellProto(); }
         uint32 GetId() const{ return GetHolder()->GetSpellProto()->Id; }
         uint64 GetCastItemGUID() const { return GetHolder()->GetCastItemGUID(); }
-        uint64 const& GetCasterGUID() const { return GetHolder()->GetCasterGUID(); }
+        uint64 const& GetCasterGUID() const { return GetHolder()->GetCasterGUID(); }//can't be easy replaced by GetCasterGuid until AuraHolders backporting ig we don't want create additional problems for this.
+        ObjectGuid GetCasterGuid() const { return GetHolder()->GetCasterGUID(); }
         Unit* GetCaster() const { return GetHolder()->GetCaster(); }
         Unit* GetTarget() const { return GetHolder()->GetTarget(); }
 
@@ -388,7 +390,7 @@ class MANGOS_DLL_SPEC Aura
         time_t GetAuraApplyTime() const { return m_applyTime; }
         uint32 GetAuraTicks() const { return m_periodicTick; }
         uint32 GetAuraMaxTicks() const { return m_maxduration > 0 && m_modifier.periodictime > 0 ? m_maxduration / m_modifier.periodictime : 0; }
-        uint8 GetStackAmount() const { return GetHolder()->GetStackAmount(); }
+        uint32 GetStackAmount() const { return GetHolder()->GetStackAmount(); }
 
         void SetLoadedState(int32 damage,int32 maxduration,int32 duration)
         {
@@ -418,8 +420,6 @@ class MANGOS_DLL_SPEC Aura
         void ApplyModifier(bool apply, bool Real = false);
 
         void UpdateAura(uint32 diff) { SetInUse(true); Update(diff); SetInUse(false); }
-        void _AddAura();
-        bool _RemoveAura();
 
         void SetRemoveMode(AuraRemoveMode mode) { m_removeMode = mode; }
 
@@ -512,7 +512,7 @@ class MANGOS_DLL_SPEC SingleEnemyTargetAura : public Aura
 
     protected:
         SingleEnemyTargetAura(SpellEntry const* spellproto, SpellEffectIndex eff, int32 *currentBasePoints, SpellAuraHolder *holder, Unit *target, Unit *caster  = NULL, Item* castItem = NULL);
-        uint64 m_casters_target_guid;
+        ObjectGuid m_castersTargetGuid;
 };
 
 Aura* CreateAura(SpellEntry const* spellproto, SpellEffectIndex eff, int32 *currentBasePoints, SpellAuraHolder *holder, Unit *target, Unit *caster = NULL, Item* castItem = NULL);

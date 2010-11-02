@@ -16,7 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include "Common.h"
+#include "Chat.h"
 #include "Language.h"
 #include "Database/DatabaseEnv.h"
 #include "WorldPacket.h"
@@ -28,7 +28,6 @@
 #include "ObjectGuid.h"
 #include "Player.h"
 #include "UpdateMask.h"
-#include "Chat.h"
 #include "GridNotifiersImpl.h"
 #include "CellImpl.h"
 #include "AccountMgr.h"
@@ -776,6 +775,12 @@ ChatCommand * ChatHandler::getCommandTable()
     return commandTable;
 }
 
+ChatHandler::ChatHandler(WorldSession* session) : m_session(session) {}
+
+ChatHandler::ChatHandler(Player* player) : m_session(player->GetSession()) {}
+
+ChatHandler::~ChatHandler() {}
+
 const char *ChatHandler::GetMangosString(int32 entry) const
 {
     return m_session->GetMangosString(entry);
@@ -795,6 +800,11 @@ bool ChatHandler::isAvailable(ChatCommand const& cmd) const
 {
     // check security level only for simple  command (without child commands)
     return GetAccessLevel() >= (AccountTypes)cmd.SecurityLevel;
+}
+
+std::string ChatHandler::GetNameLink() const
+{
+    return GetNameLink(m_session->GetPlayer());
 }
 
 bool ChatHandler::HasLowerSecurity(Player* target, uint64 guid, bool strong)
@@ -1147,7 +1157,7 @@ void ChatHandler::ExecuteCommand(const char* text)
                     if (m_session)
                     {
                         Player* p = m_session->GetPlayer();
-                        ObjectGuid sel_guid = p->GetSelection();
+                        ObjectGuid sel_guid = p->GetSelectionGuid();
                         sLog.outCommand(GetAccountId(),"Command: %s [Player: %s (Account: %u) X: %f Y: %f Z: %f Map: %u Selected: %s]",
                             fullcmd.c_str(),p->GetName(),GetAccountId(),p->GetPositionX(),p->GetPositionY(),p->GetPositionZ(),p->GetMapId(),
                             sel_guid.GetString().c_str());
@@ -1245,8 +1255,8 @@ bool ChatHandler::SetDataForCommandInTable(ChatCommand *commandTable, const char
 
 bool ChatHandler::ParseCommands(const char* text)
 {
-    ASSERT(text);
-    ASSERT(*text);
+    MANGOS_ASSERT(text);
+    MANGOS_ASSERT(*text);
 
     //if(m_session->GetSecurity() == SEC_PLAYER)
     //    return false;
@@ -1985,7 +1995,7 @@ void ChatHandler::FillMessageData( WorldPacket *data, WorldSession* session, uin
 
     if (type == CHAT_MSG_CHANNEL)
     {
-        ASSERT(channelName);
+        MANGOS_ASSERT(channelName);
         *data << channelName;
     }
 
@@ -2003,9 +2013,9 @@ Player * ChatHandler::getSelectedPlayer()
     if(!m_session)
         return NULL;
 
-    uint64 guid  = m_session->GetPlayer()->GetSelection();
+    ObjectGuid guid  = m_session->GetPlayer()->GetSelectionGuid();
 
-    if (guid == 0)
+    if (guid.IsEmpty())
         return m_session->GetPlayer();
 
     return sObjectMgr.GetPlayer(guid);
@@ -2016,9 +2026,9 @@ Unit* ChatHandler::getSelectedUnit()
     if(!m_session)
         return NULL;
 
-    uint64 guid = m_session->GetPlayer()->GetSelection();
+    ObjectGuid guid = m_session->GetPlayer()->GetSelectionGuid();
 
-    if (guid == 0)
+    if (guid.IsEmpty())
         return m_session->GetPlayer();
 
     // can be selected player at another map
@@ -2030,7 +2040,7 @@ Creature* ChatHandler::getSelectedCreature()
     if(!m_session)
         return NULL;
 
-    return m_session->GetPlayer()->GetMap()->GetAnyTypeCreature(m_session->GetPlayer()->GetSelection());
+    return m_session->GetPlayer()->GetMap()->GetAnyTypeCreature(m_session->GetPlayer()->GetSelectionGuid());
 }
 
 /**
@@ -2693,7 +2703,7 @@ GameObject* ChatHandler::GetObjectGlobalyWithGuidOrNearWithDbGuid(uint32 lowguid
     if(!obj && sObjectMgr.GetGOData(lowguid))                   // guid is DB guid of object
     {
         MaNGOS::GameObjectWithDbGUIDCheck go_check(*pl,lowguid);
-        MaNGOS::GameObjectSearcher<MaNGOS::GameObjectWithDbGUIDCheck> checker(pl,obj,go_check);
+        MaNGOS::GameObjectSearcher<MaNGOS::GameObjectWithDbGUIDCheck> checker(obj,go_check);
         Cell::VisitGridObjects(pl,checker, pl->GetMap()->GetVisibilityDistance());
     }
 
@@ -3250,6 +3260,11 @@ uint32 ChatHandler::ExtractAccountId(char** args, std::string* accountName /*= N
         *targetIfNullArg = NULL;
 
     return account_id;
+}
+
+std::string ChatHandler::GetNameLink(Player* chr) const
+{
+    return playerLink(chr->GetName());
 }
 
 bool ChatHandler::needReportToTarget(Player* chr) const

@@ -382,14 +382,14 @@ void WorldSession::HandleZoneUpdateOpcode( WorldPacket & recv_data )
 void WorldSession::HandleSetTargetOpcode( WorldPacket & recv_data )
 {
     // When this packet send?
-    uint64 guid ;
+    ObjectGuid guid ;
     recv_data >> guid;
 
-    _player->SetTargetGUID(guid);
+    _player->SetTargetGuid(guid);
 
     // update reputation list if need
-    Unit* unit = ObjectAccessor::GetUnit(*_player, guid );
-    if(!unit)
+    Unit* unit = ObjectAccessor::GetUnit(*_player, guid );  // can select group members at diff maps
+    if (!unit)
         return;
 
     if(FactionTemplateEntry const* factionTemplateEntry = sFactionTemplateStore.LookupEntry(unit->getFaction()))
@@ -398,14 +398,14 @@ void WorldSession::HandleSetTargetOpcode( WorldPacket & recv_data )
 
 void WorldSession::HandleSetSelectionOpcode( WorldPacket & recv_data )
 {
-    uint64 guid;
+    ObjectGuid guid;
     recv_data >> guid;
 
-    _player->SetSelection(guid);
+    _player->SetSelectionGuid(guid);
 
     // update reputation list if need
-    Unit* unit = ObjectAccessor::GetUnit(*_player, guid );
-    if(!unit)
+    Unit* unit = ObjectAccessor::GetUnit(*_player, guid );  // can select group members at diff maps
+    if (!unit)
         return;
 
     if(FactionTemplateEntry const* factionTemplateEntry = sFactionTemplateStore.LookupEntry(unit->getFaction()))
@@ -587,10 +587,10 @@ void WorldSession::HandleDelIgnoreOpcode( WorldPacket & recv_data )
 void WorldSession::HandleSetContactNotesOpcode( WorldPacket & recv_data )
 {
     DEBUG_LOG("CMSG_SET_CONTACT_NOTES");
-    uint64 guid;
+    ObjectGuid guid;
     std::string note;
     recv_data >> guid >> note;
-    _player->GetSocial()->SetFriendNote(GUID_LOPART(guid), note);
+    _player->GetSocial()->SetFriendNote(guid.GetCounter(), note);
 }
 
 void WorldSession::HandleBugOpcode( WorldPacket & recv_data )
@@ -619,7 +619,7 @@ void WorldSession::HandleReclaimCorpseOpcode(WorldPacket &recv_data)
 {
     DETAIL_LOG("WORLD: Received CMSG_RECLAIM_CORPSE");
 
-    uint64 guid;
+    ObjectGuid guid;
     recv_data >> guid;
 
     if (GetPlayer()->isAlive())
@@ -656,7 +656,7 @@ void WorldSession::HandleResurrectResponseOpcode(WorldPacket & recv_data)
 {
     DETAIL_LOG("WORLD: Received CMSG_RESURRECT_RESPONSE");
 
-    uint64 guid;
+    ObjectGuid guid;
     uint8 status;
     recv_data >> guid;
     recv_data >> status;
@@ -965,7 +965,7 @@ void WorldSession::HandleMoveTimeSkippedOpcode( WorldPacket & recv_data )
     recv_data >> Unused<uint32>();
 
     /*
-        uint64 guid;
+        ObjectGuid guid;
         uint32 time_skipped;
         recv_data >> guid;
         recv_data >> time_skipped;
@@ -992,7 +992,7 @@ void WorldSession::HandleMoveUnRootAck(WorldPacket& recv_data)
     // no used
     recv_data.rpos(recv_data.wpos());                       // prevent warnings spam
 /*
-    uint64 guid;
+    ObjectGuid guid;
     recv_data >> guid;
 
     // now can skip not our packet
@@ -1016,11 +1016,11 @@ void WorldSession::HandleMoveRootAck(WorldPacket& recv_data)
     // no used
     recv_data.rpos(recv_data.wpos());                       // prevent warnings spam
 /*
-    uint64 guid;
+    ObjectGuid guid;
     recv_data >> guid;
 
     // now can skip not our packet
-    if(_player->GetGUID() != guid)
+    if(_player->GetObjectGuid() != guid)
     {
         recv_data.rpos(recv_data.wpos());                   // prevent warnings spam
         return;
@@ -1035,7 +1035,7 @@ void WorldSession::HandleMoveRootAck(WorldPacket& recv_data)
 */
 }
 
-void WorldSession::HandleSetActionBarToggles(WorldPacket& recv_data)
+void WorldSession::HandleSetActionBarTogglesOpcode(WorldPacket& recv_data)
 {
     uint8 ActionBar;
 
@@ -1075,11 +1075,11 @@ void WorldSession::HandlePlayedTime(WorldPacket& recv_data)
 
 void WorldSession::HandleInspectOpcode(WorldPacket& recv_data)
 {
-    uint64 guid;
+    ObjectGuid guid;
     recv_data >> guid;
-    DEBUG_LOG("Inspected guid is (GUID: %u TypeId: %u)", GUID_LOPART(guid), GuidHigh2TypeId(GUID_HIPART(guid)));
+    DEBUG_LOG("Inspected guid is %s", guid.GetString().c_str());
 
-    _player->SetSelection(guid);
+    _player->SetSelectionGuid(guid);
 
     Player *plr = sObjectMgr.GetPlayer(guid);
     if(!plr)                                                // wrong player
@@ -1106,7 +1106,7 @@ void WorldSession::HandleInspectOpcode(WorldPacket& recv_data)
 
 void WorldSession::HandleInspectHonorStatsOpcode(WorldPacket& recv_data)
 {
-    uint64 guid;
+    ObjectGuid guid;
     recv_data >> guid;
 
     Player *player = sObjectMgr.GetPlayer(guid);
@@ -1287,19 +1287,22 @@ void WorldSession::HandleFarSightOpcode( WorldPacket & recv_data )
     DEBUG_LOG("WORLD: CMSG_FAR_SIGHT");
     //recv_data.hexlike();
 
-    uint8 unk;
-    recv_data >> unk;
+    uint8 op;
+    recv_data >> op;
 
-    switch(unk)
+    WorldObject* obj = _player->GetMap()->GetWorldObject(_player->GetFarSightGuid());
+    if (!obj)
+        return;
+
+    switch(op)
     {
         case 0:
-            //WorldPacket data(SMSG_CLEAR_FAR_SIGHT_IMMEDIATE, 0)
-            //SendPacket(&data);
-            //_player->SetUInt64Value(PLAYER_FARSIGHT, 0);
             DEBUG_LOG("Removed FarSight from %s", _player->GetObjectGuid().GetString().c_str());
+            _player->GetCamera().ResetView(false);
             break;
         case 1:
             DEBUG_LOG("Added FarSight %s to %s", _player->GetFarSightGuid().GetString().c_str(), _player->GetObjectGuid().GetString().c_str());
+            _player->GetCamera().SetView(obj, false);
             break;
     }
 }
@@ -1504,7 +1507,7 @@ void WorldSession::HandleSetTaxiBenchmarkOpcode( WorldPacket & recv_data )
     DEBUG_LOG("Client used \"/timetest %d\" command", mode);
 }
 
-void WorldSession::HandleQueryInspectAchievements( WorldPacket & recv_data )
+void WorldSession::HandleQueryInspectAchievementsOpcode( WorldPacket & recv_data )
 {
     ObjectGuid guid;
 
@@ -1514,7 +1517,7 @@ void WorldSession::HandleQueryInspectAchievements( WorldPacket & recv_data )
         player->GetAchievementMgr().SendRespondInspectAchievements(_player);
 }
 
-void WorldSession::HandleWorldStateUITimerUpdate(WorldPacket& /*recv_data*/)
+void WorldSession::HandleWorldStateUITimerUpdateOpcode(WorldPacket& /*recv_data*/)
 {
     // empty opcode
     DEBUG_LOG("WORLD: CMSG_WORLD_STATE_UI_TIMER_UPDATE");
@@ -1524,7 +1527,7 @@ void WorldSession::HandleWorldStateUITimerUpdate(WorldPacket& /*recv_data*/)
     SendPacket(&data);
 }
 
-void WorldSession::HandleReadyForAccountDataTimes(WorldPacket& /*recv_data*/)
+void WorldSession::HandleReadyForAccountDataTimesOpcode(WorldPacket& /*recv_data*/)
 {
     // empty opcode
     DEBUG_LOG("WORLD: CMSG_READY_FOR_ACCOUNT_DATA_TIMES");

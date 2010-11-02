@@ -19,6 +19,7 @@
 #ifndef MANGOSSERVER_PET_H
 #define MANGOSSERVER_PET_H
 
+#include "Common.h"
 #include "ObjectGuid.h"
 #include "Creature.h"
 #include "Unit.h"
@@ -155,7 +156,7 @@ class Pet : public Creature
         void Remove(PetSaveMode mode, bool returnreagent = false);
         static void DeleteFromDB(uint32 guidlow);
 
-        void setDeathState(DeathState s);                   // overwrite virtual Creature::setDeathState and Unit::setDeathState
+        void SetDeathState(DeathState s);                   // overwrite virtual Creature::SetDeathState and Unit::SetDeathState
         void Update(uint32 diff);                           // overwrite virtual Creature::Update and Unit::Update
 
         uint8 GetPetAutoSpellSize() const { return m_autospells.size(); }
@@ -261,11 +262,11 @@ class Pet : public Creature
 
         void SaveToDB(uint32, uint8)                        // overwrited of Creature::SaveToDB     - don't must be called
         {
-            ASSERT(false);
+            MANGOS_ASSERT(false);
         }
         void DeleteFromDB()                                 // overwrited of Creature::DeleteFromDB - don't must be called
         {
-            ASSERT(false);
+            MANGOS_ASSERT(false);
         }
 };
 #endif

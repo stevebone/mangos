@@ -79,8 +79,10 @@ bool LoginQueryHolder::Initialize()
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADQUESTSTATUS,     "SELECT quest,status,rewarded,explored,timer,mobcount1,mobcount2,mobcount3,mobcount4,itemcount1,itemcount2,itemcount3,itemcount4 FROM character_queststatus WHERE guid = '%u'", GUID_LOPART(m_guid));
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADDAILYQUESTSTATUS,"SELECT quest FROM character_queststatus_daily WHERE guid = '%u'", GUID_LOPART(m_guid));
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADWEEKLYQUESTSTATUS,"SELECT quest FROM character_queststatus_weekly WHERE guid = '%u'", GUID_LOPART(m_guid));
+    res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADMONTHLYQUESTSTATUS,"SELECT quest FROM character_queststatus_monthly WHERE guid = '%u'", GUID_LOPART(m_guid));
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADREPUTATION,      "SELECT faction,standing,flags FROM character_reputation WHERE guid = '%u'", GUID_LOPART(m_guid));
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADINVENTORY,       "SELECT data,text,bag,slot,item,item_template FROM character_inventory JOIN item_instance ON character_inventory.item = item_instance.guid WHERE character_inventory.guid = '%u' ORDER BY bag,slot", GUID_LOPART(m_guid));
+    res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADITEMLOOT,        "SELECT guid,itemid,amount,suffix,property FROM item_loot WHERE owner_guid = '%u'", GUID_LOPART(m_guid));
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADACTIONS,         "SELECT spec,button,action,type FROM character_action WHERE guid = '%u' ORDER BY button", GUID_LOPART(m_guid));
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADSOCIALLIST,      "SELECT friend,flags,note FROM character_social WHERE guid = '%u' LIMIT 255", GUID_LOPART(m_guid));
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADHOMEBIND,        "SELECT map,zone,position_x,position_y,position_z FROM character_homebind WHERE guid = '%u'", GUID_LOPART(m_guid));
@@ -796,7 +798,7 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder *holder)
     delete holder;
 }
 
-void WorldSession::HandleSetFactionAtWar( WorldPacket & recv_data )
+void WorldSession::HandleSetFactionAtWarOpcode( WorldPacket & recv_data )
 {
     DEBUG_LOG( "WORLD: Received CMSG_SET_FACTION_ATWAR" );
 
@@ -809,14 +811,14 @@ void WorldSession::HandleSetFactionAtWar( WorldPacket & recv_data )
     GetPlayer()->GetReputationMgr().SetAtWar(repListID, flag);
 }
 
-void WorldSession::HandleMeetingStoneInfo( WorldPacket & /*recv_data*/ )
+void WorldSession::HandleMeetingStoneInfoOpcode( WorldPacket & /*recv_data*/ )
 {
     DEBUG_LOG( "WORLD: Received CMSG_MEETING_STONE_INFO" );
 
     SendLfgUpdate(0, 0, 0);
 }
 
-void WorldSession::HandleTutorialFlag( WorldPacket & recv_data )
+void WorldSession::HandleTutorialFlagOpcode( WorldPacket & recv_data )
 {
     uint32 iFlag;
     recv_data >> iFlag;
@@ -836,13 +838,13 @@ void WorldSession::HandleTutorialFlag( WorldPacket & recv_data )
     //DEBUG_LOG("Received Tutorial Flag Set {%u}.", iFlag);
 }
 
-void WorldSession::HandleTutorialClear( WorldPacket & /*recv_data*/ )
+void WorldSession::HandleTutorialClearOpcode( WorldPacket & /*recv_data*/ )
 {
     for (int i = 0; i < 8; ++i)
         SetTutorialInt( i, 0xFFFFFFFF );
 }
 
-void WorldSession::HandleTutorialReset( WorldPacket & /*recv_data*/ )
+void WorldSession::HandleTutorialResetOpcode( WorldPacket & /*recv_data*/ )
 {
     for (int i = 0; i < 8; ++i)
         SetTutorialInt( i, 0x00000000 );
@@ -880,7 +882,7 @@ void WorldSession::HandleShowingCloakOpcode( WorldPacket & /*recv_data*/ )
 
 void WorldSession::HandleCharRenameOpcode(WorldPacket& recv_data)
 {
-    uint64 guid;
+    ObjectGuid guid;
     std::string newname;
 
     recv_data >> guid;
@@ -921,7 +923,7 @@ void WorldSession::HandleCharRenameOpcode(WorldPacket& recv_data)
     CharacterDatabase.AsyncPQuery(&WorldSession::HandleChangePlayerNameOpcodeCallBack,
         GetAccountId(), newname,
         "SELECT guid, name FROM characters WHERE guid = %d AND account = %d AND (at_login & %d) = %d AND NOT EXISTS (SELECT NULL FROM characters WHERE name = '%s')",
-        GUID_LOPART(guid), GetAccountId(), AT_LOGIN_RENAME, AT_LOGIN_RENAME, escaped_newname.c_str()
+        guid.GetCounter(), GetAccountId(), AT_LOGIN_RENAME, AT_LOGIN_RENAME, escaped_newname.c_str()
     );
 }
 
@@ -960,9 +962,9 @@ void WorldSession::HandleChangePlayerNameOpcodeCallBack(QueryResult *result, uin
     session->SendPacket(&data);
 }
 
-void WorldSession::HandleSetPlayerDeclinedNames(WorldPacket& recv_data)
+void WorldSession::HandleSetPlayerDeclinedNamesOpcode(WorldPacket& recv_data)
 {
-    uint64 guid;
+    ObjectGuid guid;
 
     recv_data >> guid;
 
@@ -972,7 +974,7 @@ void WorldSession::HandleSetPlayerDeclinedNames(WorldPacket& recv_data)
     {
         WorldPacket data(SMSG_SET_PLAYER_DECLINED_NAMES_RESULT, 4+8);
         data << uint32(1);
-        data << uint64(guid);
+        data << ObjectGuid(guid);
         SendPacket(&data);
         return;
     }
@@ -982,7 +984,7 @@ void WorldSession::HandleSetPlayerDeclinedNames(WorldPacket& recv_data)
     {
         WorldPacket data(SMSG_SET_PLAYER_DECLINED_NAMES_RESULT, 4+8);
         data << uint32(1);
-        data << uint64(guid);
+        data << ObjectGuid(guid);
         SendPacket(&data);
         return;
     }
@@ -991,7 +993,7 @@ void WorldSession::HandleSetPlayerDeclinedNames(WorldPacket& recv_data)
     {
         WorldPacket data(SMSG_SET_PLAYER_DECLINED_NAMES_RESULT, 4+8);
         data << uint32(1);
-        data << uint64(guid);
+        data << ObjectGuid(guid);
         SendPacket(&data);
         return;
     }
@@ -1005,7 +1007,7 @@ void WorldSession::HandleSetPlayerDeclinedNames(WorldPacket& recv_data)
     {
         WorldPacket data(SMSG_SET_PLAYER_DECLINED_NAMES_RESULT, 4+8);
         data << uint32(1);
-        data << uint64(guid);
+        data << ObjectGuid(guid);
         SendPacket(&data);
         return;
     }
@@ -1017,7 +1019,7 @@ void WorldSession::HandleSetPlayerDeclinedNames(WorldPacket& recv_data)
         {
             WorldPacket data(SMSG_SET_PLAYER_DECLINED_NAMES_RESULT, 4+8);
             data << uint32(1);
-            data << uint64(guid);
+            data << ObjectGuid(guid);
             SendPacket(&data);
             return;
         }
@@ -1027,7 +1029,7 @@ void WorldSession::HandleSetPlayerDeclinedNames(WorldPacket& recv_data)
     {
         WorldPacket data(SMSG_SET_PLAYER_DECLINED_NAMES_RESULT, 4+8);
         data << uint32(1);
-        data << uint64(guid);
+        data << ObjectGuid(guid);
         SendPacket(&data);
         return;
     }
@@ -1036,18 +1038,18 @@ void WorldSession::HandleSetPlayerDeclinedNames(WorldPacket& recv_data)
         CharacterDatabase.escape_string(declinedname.name[i]);
 
     CharacterDatabase.BeginTransaction();
-    CharacterDatabase.PExecute("DELETE FROM character_declinedname WHERE guid = '%u'", GUID_LOPART(guid));
+    CharacterDatabase.PExecute("DELETE FROM character_declinedname WHERE guid = '%u'", guid.GetCounter());
     CharacterDatabase.PExecute("INSERT INTO character_declinedname (guid, genitive, dative, accusative, instrumental, prepositional) VALUES ('%u','%s','%s','%s','%s','%s')",
-        GUID_LOPART(guid), declinedname.name[0].c_str(), declinedname.name[1].c_str(), declinedname.name[2].c_str(), declinedname.name[3].c_str(), declinedname.name[4].c_str());
+        guid.GetCounter(), declinedname.name[0].c_str(), declinedname.name[1].c_str(), declinedname.name[2].c_str(), declinedname.name[3].c_str(), declinedname.name[4].c_str());
     CharacterDatabase.CommitTransaction();
 
     WorldPacket data(SMSG_SET_PLAYER_DECLINED_NAMES_RESULT, 4+8);
     data << uint32(0);                                      // OK
-    data << uint64(guid);
+    data << ObjectGuid(guid);
     SendPacket(&data);
 }
 
-void WorldSession::HandleAlterAppearance( WorldPacket & recv_data )
+void WorldSession::HandleAlterAppearanceOpcode( WorldPacket & recv_data )
 {
     DEBUG_LOG("CMSG_ALTER_APPEARANCE");
 
@@ -1095,7 +1097,7 @@ void WorldSession::HandleAlterAppearance( WorldPacket & recv_data )
     _player->SetStandState(0);                              // stand up
 }
 
-void WorldSession::HandleRemoveGlyph( WorldPacket & recv_data )
+void WorldSession::HandleRemoveGlyphOpcode( WorldPacket & recv_data )
 {
     uint32 slot;
     recv_data >> slot;
@@ -1114,9 +1116,9 @@ void WorldSession::HandleRemoveGlyph( WorldPacket & recv_data )
     }
 }
 
-void WorldSession::HandleCharCustomize(WorldPacket& recv_data)
+void WorldSession::HandleCharCustomizeOpcode(WorldPacket& recv_data)
 {
-    uint64 guid;
+    ObjectGuid guid;
     std::string newname;
 
     recv_data >> guid;
@@ -1125,7 +1127,7 @@ void WorldSession::HandleCharCustomize(WorldPacket& recv_data)
     uint8 gender, skin, face, hairStyle, hairColor, facialHair;
     recv_data >> gender >> skin >> hairColor >> hairStyle >> facialHair >> face;
 
-    QueryResult *result = CharacterDatabase.PQuery("SELECT at_login FROM characters WHERE guid ='%u'", GUID_LOPART(guid));
+    QueryResult *result = CharacterDatabase.PQuery("SELECT at_login FROM characters WHERE guid ='%u'", guid.GetCounter());
     if (!result)
     {
         WorldPacket data(SMSG_CHAR_CUSTOMIZE, 1);
@@ -1174,28 +1176,26 @@ void WorldSession::HandleCharCustomize(WorldPacket& recv_data)
     }
 
     // character with this name already exist
-    if (uint64 newguid = sObjectMgr.GetPlayerGUIDByName(newname))
+    ObjectGuid newguid = sObjectMgr.GetPlayerGUIDByName(newname);
+    if (!newguid.IsEmpty() && newguid != guid)
     {
-        if (newguid != guid)
-        {
-            WorldPacket data(SMSG_CHAR_CUSTOMIZE, 1);
-            data << uint8(CHAR_CREATE_NAME_IN_USE);
-            SendPacket( &data );
-            return;
-        }
+        WorldPacket data(SMSG_CHAR_CUSTOMIZE, 1);
+        data << uint8(CHAR_CREATE_NAME_IN_USE);
+        SendPacket(&data);
+        return;
     }
 
     CharacterDatabase.escape_string(newname);
     Player::Customize(guid, gender, skin, face, hairStyle, hairColor, facialHair);
-    CharacterDatabase.PExecute("UPDATE characters set name = '%s', at_login = at_login & ~ %u WHERE guid ='%u'", newname.c_str(), uint32(AT_LOGIN_CUSTOMIZE), GUID_LOPART(guid));
-    CharacterDatabase.PExecute("DELETE FROM character_declinedname WHERE guid ='%u'", GUID_LOPART(guid));
+    CharacterDatabase.PExecute("UPDATE characters set name = '%s', at_login = at_login & ~ %u WHERE guid ='%u'", newname.c_str(), uint32(AT_LOGIN_CUSTOMIZE), guid.GetCounter());
+    CharacterDatabase.PExecute("DELETE FROM character_declinedname WHERE guid ='%u'", guid.GetCounter());
 
     std::string IP_str = GetRemoteAddress();
-    sLog.outChar("Account: %d (IP: %s), Character guid: %u Customized to: %s", GetAccountId(), IP_str.c_str(), GUID_LOPART(guid), newname.c_str());
+    sLog.outChar("Account: %d (IP: %s), Character %s customized to: %s", GetAccountId(), IP_str.c_str(), guid.GetString().c_str(), newname.c_str());
 
     WorldPacket data(SMSG_CHAR_CUSTOMIZE, 1+8+(newname.size()+1)+6);
     data << uint8(RESPONSE_SUCCESS);
-    data << uint64(guid);
+    data << ObjectGuid(guid);
     data << newname;
     data << uint8(gender);
     data << uint8(skin);
@@ -1206,7 +1206,7 @@ void WorldSession::HandleCharCustomize(WorldPacket& recv_data)
     SendPacket(&data);
 }
 
-void WorldSession::HandleEquipmentSetSave(WorldPacket &recv_data)
+void WorldSession::HandleEquipmentSetSaveOpcode(WorldPacket &recv_data)
 {
     DEBUG_LOG("CMSG_EQUIPMENT_SET_SAVE");
 
@@ -1250,7 +1250,7 @@ void WorldSession::HandleEquipmentSetSave(WorldPacket &recv_data)
     _player->SetEquipmentSet(index, eqSet);
 }
 
-void WorldSession::HandleEquipmentSetDelete(WorldPacket &recv_data)
+void WorldSession::HandleEquipmentSetDeleteOpcode(WorldPacket &recv_data)
 {
     DEBUG_LOG("CMSG_EQUIPMENT_SET_DELETE");
 
@@ -1261,7 +1261,7 @@ void WorldSession::HandleEquipmentSetDelete(WorldPacket &recv_data)
     _player->DeleteEquipmentSet(setGuid.GetRawValue());
 }
 
-void WorldSession::HandleEquipmentSetUse(WorldPacket &recv_data)
+void WorldSession::HandleEquipmentSetUseOpcode(WorldPacket &recv_data)
 {
     DEBUG_LOG("CMSG_EQUIPMENT_SET_USE");
     recv_data.hexlike();

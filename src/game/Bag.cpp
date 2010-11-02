@@ -16,7 +16,6 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include "Common.h"
 #include "Bag.h"
 #include "ObjectMgr.h"
 #include "Database/DatabaseEnv.h"
@@ -75,7 +74,6 @@ bool Bag::Create(uint32 guidlow, uint32 itemid, Player const* owner)
 
     SetUInt32Value(ITEM_FIELD_MAXDURABILITY, itemProto->MaxDurability);
     SetUInt32Value(ITEM_FIELD_DURABILITY, itemProto->MaxDurability);
-    SetUInt32Value(ITEM_FIELD_FLAGS, itemProto->Flags);
     SetUInt32Value(ITEM_FIELD_STACK_COUNT, 1);
 
     // Setting the number of Slots the Container has
@@ -96,9 +94,9 @@ void Bag::SaveToDB()
     Item::SaveToDB();
 }
 
-bool Bag::LoadFromDB(uint32 guid, uint64 owner_guid, QueryResult *result)
+bool Bag::LoadFromDB(uint32 guid, uint64 owner_guid, Field *fields)
 {
-    if(!Item::LoadFromDB(guid, owner_guid, result))
+    if(!Item::LoadFromDB(guid, owner_guid, fields))
         return false;
 
     // cleanup bag content related item value fields (its will be filled correctly from `character_inventory`)
@@ -136,7 +134,7 @@ uint32 Bag::GetFreeSlots() const
 
 void Bag::RemoveItem( uint8 slot, bool /*update*/ )
 {
-    ASSERT(slot < MAX_BAG_SIZE);
+    MANGOS_ASSERT(slot < MAX_BAG_SIZE);
 
     if (m_bagslot[slot])
         m_bagslot[slot]->SetContainer(NULL);
@@ -147,7 +145,7 @@ void Bag::RemoveItem( uint8 slot, bool /*update*/ )
 
 void Bag::StoreItem( uint8 slot, Item *pItem, bool /*update*/ )
 {
-    ASSERT(slot < MAX_BAG_SIZE);
+    MANGOS_ASSERT(slot < MAX_BAG_SIZE);
 
     if( pItem )
     {

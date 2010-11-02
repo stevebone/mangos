@@ -16,7 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include "Common.h"
+#include "Player.h"
 #include "Language.h"
 #include "Database/DatabaseEnv.h"
 #include "Log.h"
@@ -26,7 +26,6 @@
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include "UpdateMask.h"
-#include "Player.h"
 #include "Vehicle.h"
 #include "SkillDiscovery.h"
 #include "QuestDef.h"
@@ -405,7 +404,7 @@ void TradeData::SetAccepted(bool state, bool crosssend /*= false*/)
 
 UpdateMask Player::updateVisualBits;
 
-Player::Player (WorldSession *session): Unit(), m_achievementMgr(this), m_reputationMgr(this), m_mover(this), m_camera(this)
+Player::Player (WorldSession *session): Unit(), m_mover(this), m_camera(this), m_achievementMgr(this), m_reputationMgr(this)
 {
     m_transport = 0;
 
@@ -431,10 +430,6 @@ Player::Player (WorldSession *session): Unit(), m_achievementMgr(this), m_reputa
     if(GetSession()->GetSecurity() == SEC_PLAYER)
         SetAcceptWhispers(true);
 
-    m_curSelection = 0;
-    m_lootGuid = 0;
-
-    m_comboTarget = 0;
     m_comboPoints = 0;
 
     m_usedTalentCount = 0;
@@ -528,10 +523,6 @@ Player::Player (WorldSession *session): Unit(), m_achievementMgr(this), m_reputa
     m_ammoDPS = 0.0f;
 
     m_temporaryUnsummonedPetNumber = 0;
-    //cache for UNIT_CREATED_BY_SPELL to allow
-    //returning reagents for temporarily removed pets
-    //when dying/logging out
-    m_oldpetspell = 0;
 
     ////////////////////Rest System/////////////////////
     time_inn_enter=0;
@@ -951,9 +942,9 @@ uint32 Player::EnvironmentalDamage(EnviromentalDamage type, uint32 damage)
     uint32 absorb = 0;
     uint32 resist = 0;
     if (type == DAMAGE_LAVA)
-        CalculateAbsorbAndResist(this, SPELL_SCHOOL_MASK_FIRE, DIRECT_DAMAGE, damage, &absorb, &resist);
+        CalculateDamageAbsorbAndResist(this, SPELL_SCHOOL_MASK_FIRE, DIRECT_DAMAGE, damage, &absorb, &resist);
     else if (type == DAMAGE_SLIME)
-        CalculateAbsorbAndResist(this, SPELL_SCHOOL_MASK_NATURE, DIRECT_DAMAGE, damage, &absorb, &resist);
+        CalculateDamageAbsorbAndResist(this, SPELL_SCHOOL_MASK_NATURE, DIRECT_DAMAGE, damage, &absorb, &resist);
 
     damage-=absorb+resist;
 
@@ -1190,6 +1181,9 @@ void Player::Update( uint32 p_time )
 {
     if(!IsInWorld())
         return;
+
+    // remove failed timed Achievements
+    GetAchievementMgr().DoFailedTimedAchievementCriterias();
 
     // undelivered mail
     if(m_nextMailDelivereTime && m_nextMailDelivereTime <= time(NULL))
@@ -1472,7 +1466,7 @@ void Player::Update( uint32 p_time )
     SendUpdateToOutOfRangeGroupMembers();
 
     Pet* pet = GetPet();
-    if(pet && !pet->IsWithinDistInMap(this, GetMap()->GetVisibilityDistance()) && (GetCharmGUID() && (pet->GetGUID() != GetCharmGUID())))
+    if (pet && !pet->IsWithinDistInMap(this, GetMap()->GetVisibilityDistance()) && (!GetCharmGuid().IsEmpty() && (pet->GetObjectGuid() != GetCharmGuid())))
     {
         RemovePet(pet, PET_SAVE_NOT_IN_SLOT, true);
     }
@@ -1481,7 +1475,7 @@ void Player::Update( uint32 p_time )
         TeleportTo(m_teleport_dest, m_teleport_options);
 }
 
-void Player::setDeathState(DeathState s)
+void Player::SetDeathState(DeathState s)
 {
     uint32 ressSpellId = 0;
 
@@ -1491,7 +1485,7 @@ void Player::setDeathState(DeathState s)
     {
         // drunken state is cleared on death
         SetDrunkValue(0);
-        // lost combo points at any target (targeted combo points clear in Unit::setDeathState)
+        // lost combo points at any target (targeted combo points clear in Unit::SetDeathState)
         ClearComboPoints();
 
         clearResurrectRequestData();
@@ -1499,13 +1493,13 @@ void Player::setDeathState(DeathState s)
         // remove form before other mods to prevent incorrect stats calculation
         RemoveAurasDueToSpell(m_ShapeShiftFormSpellId);
 
-        //FIXME: is pet dismissed at dying or releasing spirit? if second, add setDeathState(DEAD) to HandleRepopRequestOpcode and define pet unsummon here with (s == DEAD)
+        //FIXME: is pet dismissed at dying or releasing spirit? if second, add SetDeathState(DEAD) to HandleRepopRequestOpcode and define pet unsummon here with (s == DEAD)
         RemovePet(NULL, PET_SAVE_NOT_IN_SLOT, true);
 
         // remove uncontrolled pets
         RemoveMiniPet();
 
-        // save value before aura remove in Unit::setDeathState
+        // save value before aura remove in Unit::SetDeathState
         ressSpellId = GetUInt32Value(PLAYER_SELF_RES_SPELL);
 
         // passive spell
@@ -1520,7 +1514,7 @@ void Player::setDeathState(DeathState s)
             mapInstance->OnPlayerDeath(this);
     }
 
-    Unit::setDeathState(s);
+    Unit::SetDeathState(s);
 
     // restore resurrection spell id for player after aura remove
     if(s == JUST_DIED && cur && ressSpellId)
@@ -1847,7 +1841,7 @@ bool Player::TeleportTo(uint32 mapid, float x, float y, float z, float orientati
                 return true;
             }
 
-            SetSelection(0);
+            SetSelectionGuid(ObjectGuid());
 
             CombatStop();
 
@@ -2269,7 +2263,7 @@ Creature* Player::GetNPCIfCanInteractWith(ObjectGuid guid, uint32 npcflagmask)
         return NULL;
 
     // not allow interaction under control, but allow with own pets
-    if (unit->GetCharmerGUID())
+    if (!unit->GetCharmerGuid().IsEmpty())
         return NULL;
 
     // not enemy
@@ -2333,8 +2327,7 @@ GameObject* Player::GetGameObjectIfCanInteractWith(ObjectGuid guid, uint32 gameo
 
 bool Player::IsUnderWater() const
 {
-    return IsInWater() &&
-        GetPositionZ() < (GetBaseMap()->GetWaterLevel(GetPositionX(),GetPositionY())-2);
+    return GetBaseMap()->IsUnderWater(GetPositionX(), GetPositionY(), GetPositionZ()+2);
 }
 
 void Player::SetInWater(bool apply)
@@ -2418,6 +2411,7 @@ void Player::SetGameMaster(bool on)
 
     m_camera.UpdateVisibilityForOwner();
     UpdateObjectVisibility();
+    UpdateForQuestWorldObjects();
 }
 
 void Player::SetGMVisible(bool on)
@@ -3588,18 +3582,25 @@ void Player::removeSpell(uint32 spell_id, bool disabled, bool learn_low_rank, bo
         }
     }
 
-    if (CanTitanGrip())
+    // for Titan's Grip and shaman Dual-wield
+    if (CanDualWield() || CanTitanGrip())
     {
         SpellEntry const *spellInfo = sSpellStore.LookupEntry(spell_id);
-        if (IsSpellHaveEffect(spellInfo, SPELL_EFFECT_TITAN_GRIP))
+
+        if (CanDualWield() && IsSpellHaveEffect(spellInfo, SPELL_EFFECT_DUAL_WIELD))
+            SetCanDualWield(false);
+
+        if (CanTitanGrip() && IsSpellHaveEffect(spellInfo, SPELL_EFFECT_TITAN_GRIP))
         {
             SetCanTitanGrip(false);
             // Remove Titan's Grip damage penalty now
             RemoveAurasDueToSpell(49152);
-            if(sWorld.getConfig(CONFIG_BOOL_OFFHAND_CHECK_AT_TALENTS_RESET))
-                AutoUnequipOffhandIfNeed();
         }
     }
+
+    // for talents and normal spell unlearn that allow offhand use for some weapons
+    if(sWorld.getConfig(CONFIG_BOOL_OFFHAND_CHECK_AT_TALENTS_RESET))
+        AutoUnequipOffhandIfNeed();
 
     // remove from spell book if not replaced by lesser rank
     if (!prev_activate && sendUpdate)
@@ -4258,7 +4259,7 @@ void Player::DeleteFromDB(ObjectGuid playerguid, uint32 accountId, bool updateRe
                                 }
 
                                 Item *pItem = NewItemOrBag(itemProto);
-                                if (!pItem->LoadFromDB(item_guidlow, playerguid.GetRawValue(), resultItems))
+                                if (!pItem->LoadFromDB(item_guidlow, playerguid.GetRawValue(), fields2))
                                 {
                                     pItem->FSetState(ITEM_REMOVED);
                                     pItem->SaveToDB();              // it also deletes item object !
@@ -4426,7 +4427,7 @@ void Player::BuildPlayerRepop()
     if(GetCorpse())
     {
         sLog.outError("BuildPlayerRepop: player %s(%d) already has a corpse", GetName(), GetGUIDLow());
-        ASSERT(false);
+        MANGOS_ASSERT(false);
     }
 
     // create a corpse and place it at the player's location
@@ -4476,7 +4477,7 @@ void Player::ResurrectPlayer(float restore_percent, bool applySickness)
         RemoveAurasDueToSpell(20584);                       // speed bonuses
     RemoveAurasDueToSpell(8326);                            // SPELL_AURA_GHOST
 
-    setDeathState(ALIVE);
+    SetDeathState(ALIVE);
 
     SetMovement(MOVE_LAND_WALK);
     SetMovement(MOVE_UNROOT);
@@ -4539,7 +4540,7 @@ void Player::KillPlayer()
 
     StopMirrorTimers();                                     //disable timers(bars)
 
-    setDeathState(CORPSE);
+    SetDeathState(CORPSE);
     //SetFlag( UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_IN_PVP );
 
     SetFlag(UNIT_DYNAMIC_FLAGS, 0x00);
@@ -5571,7 +5572,7 @@ void Player::UpdateCombatSkills(Unit *pVictim, WeaponAttackType attType, bool de
 {
     uint32 plevel = getLevel();                             // if defense than pVictim == attacker
     uint32 greylevel = MaNGOS::XP::GetGrayLevel(plevel);
-    uint32 moblevel = pVictim->getLevelForTarget(this);
+    uint32 moblevel = pVictim->GetLevelForTarget(this);
     if(moblevel < greylevel)
         return;
 
@@ -5588,10 +5589,7 @@ void Player::UpdateCombatSkills(Unit *pVictim, WeaponAttackType attType, bool de
 
     float chance = float(3 * lvldif * skilldif) / plevel;
     if(!defence)
-    {
-        if(getClass() == CLASS_WARRIOR || getClass() == CLASS_ROGUE)
-            chance *= 0.1f * GetStat(STAT_INTELLECT);
-    }
+        chance *= 0.1f * GetStat(STAT_INTELLECT);
 
     chance = chance < 1.0f ? 1.0f : chance;                 //minimum chance to increase skill is 1%
 
@@ -6049,6 +6047,8 @@ bool Player::SetPosition(float x, float y, float z, float orientation, bool tele
         else
             RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TURNING);
 
+        RemoveSpellsCausingAura(SPELL_AURA_FEIGN_DEATH);
+
         // move and update visible state if need
         m->PlayerRelocation(this, x, y, z, orientation);
 
@@ -6059,8 +6059,11 @@ bool Player::SetPosition(float x, float y, float z, float orientation, bool tele
         z = GetPositionZ();
 
         // group update
-        if(GetGroup() && (old_x != x || old_y != y))
+        if (GetGroup() && (old_x != x || old_y != y))
             SetGroupUpdateFlag(GROUP_UPDATE_FLAG_POSITION);
+
+        if (GetTrader() && !IsWithinDistInMap(GetTrader(), INTERACTION_DISTANCE))
+            GetSession()->SendCancelTrade();   // will close both side trade windows
     }
 
     // code block for underwater state update
@@ -6635,7 +6638,7 @@ bool Player::RewardHonor(Unit *uVictim, uint32 groupsize, float honor)
         {
             Creature *cVictim = (Creature *)uVictim;
 
-            if (!cVictim->isRacialLeader())
+            if (!cVictim->IsRacialLeader())
                 return false;
 
             honor = 100;                                    // ??? need more info
@@ -7003,14 +7006,14 @@ void Player::DuelComplete(DuelCompleteType type)
         RemoveAurasDueToSpell(auras2remove[i]);
 
     // cleanup combo points
-    if(GetComboTarget()==duel->opponent->GetGUID())
+    if (GetComboTargetGuid() == duel->opponent->GetObjectGuid())
         ClearComboPoints();
-    else if(GetComboTarget()==duel->opponent->GetPetGUID())
+    else if (GetComboTargetGuid() == duel->opponent->GetPetGuid())
         ClearComboPoints();
 
-    if(duel->opponent->GetComboTarget()==GetGUID())
+    if (duel->opponent->GetComboTargetGuid() == GetObjectGuid())
         duel->opponent->ClearComboPoints();
-    else if(duel->opponent->GetComboTarget()==GetPetGUID())
+    else if (duel->opponent->GetComboTargetGuid() == GetPetGuid())
         duel->opponent->ClearComboPoints();
 
     //cleanups
@@ -7343,7 +7346,7 @@ void Player::_ApplyItemBonuses(ItemPrototype const *proto, uint8 slot, bool appl
             ApplyFeralAPBonus(feral_bonus, apply);
     }
 
-    if(!IsUseEquipedWeapon(slot==EQUIPMENT_SLOT_MAINHAND))
+    if(!IsUseEquippedWeapon(slot==EQUIPMENT_SLOT_MAINHAND))
         return;
 
     if (proto->Delay)
@@ -7999,25 +8002,28 @@ void Player::SendLoot(ObjectGuid guid, LootType loot_type)
 
             loot = &item->loot;
 
-            if (!item->m_lootGenerated)
+            if (!item->HasGeneratedLoot())
             {
-                item->m_lootGenerated = true;
-                loot->clear();
+                item->loot.clear();
 
                 switch(loot_type)
                 {
                     case LOOT_DISENCHANTING:
                         loot->FillLoot(item->GetProto()->DisenchantID, LootTemplates_Disenchant, this,true);
+                        item->SetLootState(ITEM_LOOT_TEMPORARY);
                         break;
                     case LOOT_PROSPECTING:
                         loot->FillLoot(item->GetEntry(), LootTemplates_Prospecting, this,true);
+                        item->SetLootState(ITEM_LOOT_TEMPORARY);
                         break;
                     case LOOT_MILLING:
                         loot->FillLoot(item->GetEntry(), LootTemplates_Milling, this,true);
+                        item->SetLootState(ITEM_LOOT_TEMPORARY);
                         break;
                     default:
                         loot->FillLoot(item->GetEntry(), LootTemplates_Item, this,true);
                         loot->generateMoneyLoot(item->GetProto()->MinMoneyLoot,item->GetProto()->MaxMoneyLoot);
+                        item->SetLootState(ITEM_LOOT_CHANGED);
                         break;
                 }
             }
@@ -8237,252 +8243,252 @@ void Player::SendUpdateWorldState(uint32 Field, uint32 Value)
 
 static WorldStatePair AV_world_states[] =
 {
-    { 0x7ae, 0x1 },                                         // 7 snowfall n
-    { 0x532, 0x1 },                                         // 8 frostwolfhut hc
-    { 0x531, 0x0 },                                         // 9 frostwolfhut ac
-    { 0x52e, 0x0 },                                         // 10 stormpike firstaid a_a
-    { 0x571, 0x0 },                                         // 11 east frostwolf tower horde assaulted -unused
-    { 0x570, 0x0 },                                         // 12 west frostwolf tower horde assaulted - unused
-    { 0x567, 0x1 },                                         // 13 frostwolfe c
-    { 0x566, 0x1 },                                         // 14 frostwolfw c
-    { 0x550, 0x1 },                                         // 15 irondeep (N) ally
-    { 0x544, 0x0 },                                         // 16 ice grave a_a
-    { 0x536, 0x0 },                                         // 17 stormpike grave h_c
-    { 0x535, 0x1 },                                         // 18 stormpike grave a_c
-    { 0x518, 0x0 },                                         // 19 stoneheart grave a_a
-    { 0x517, 0x0 },                                         // 20 stoneheart grave h_a
-    { 0x574, 0x0 },                                         // 21 1396 unk
-    { 0x573, 0x0 },                                         // 22 iceblood tower horde assaulted -unused
-    { 0x572, 0x0 },                                         // 23 towerpoint horde assaulted - unused
-    { 0x56f, 0x0 },                                         // 24 1391 unk
-    { 0x56e, 0x0 },                                         // 25 iceblood a
-    { 0x56d, 0x0 },                                         // 26 towerp a
-    { 0x56c, 0x0 },                                         // 27 frostwolfe a
-    { 0x56b, 0x0 },                                         // 28 froswolfw a
-    { 0x56a, 0x1 },                                         // 29 1386 unk
-    { 0x569, 0x1 },                                         // 30 iceblood c
-    { 0x568, 0x1 },                                         // 31 towerp c
-    { 0x565, 0x0 },                                         // 32 stoneh tower a
-    { 0x564, 0x0 },                                         // 33 icewing tower a
-    { 0x563, 0x0 },                                         // 34 dunn a
-    { 0x562, 0x0 },                                         // 35 duns a
-    { 0x561, 0x0 },                                         // 36 stoneheart bunker alliance assaulted - unused
-    { 0x560, 0x0 },                                         // 37 icewing bunker alliance assaulted - unused
-    { 0x55f, 0x0 },                                         // 38 dunbaldar south alliance assaulted - unused
-    { 0x55e, 0x0 },                                         // 39 dunbaldar north alliance assaulted - unused
-    { 0x55d, 0x0 },                                         // 40 stone tower d
-    { 0x3c6, 0x0 },                                         // 41 966 unk
-    { 0x3c4, 0x0 },                                         // 42 964 unk
-    { 0x3c2, 0x0 },                                         // 43 962 unk
-    { 0x516, 0x1 },                                         // 44 stoneheart grave a_c
-    { 0x515, 0x0 },                                         // 45 stonheart grave h_c
-    { 0x3b6, 0x0 },                                         // 46 950 unk
-    { 0x55c, 0x0 },                                         // 47 icewing tower d
-    { 0x55b, 0x0 },                                         // 48 dunn d
-    { 0x55a, 0x0 },                                         // 49 duns d
-    { 0x559, 0x0 },                                         // 50 1369 unk
-    { 0x558, 0x0 },                                         // 51 iceblood d
-    { 0x557, 0x0 },                                         // 52 towerp d
-    { 0x556, 0x0 },                                         // 53 frostwolfe d
-    { 0x555, 0x0 },                                         // 54 frostwolfw d
-    { 0x554, 0x1 },                                         // 55 stoneh tower c
-    { 0x553, 0x1 },                                         // 56 icewing tower c
-    { 0x552, 0x1 },                                         // 57 dunn c
-    { 0x551, 0x1 },                                         // 58 duns c
-    { 0x54f, 0x0 },                                         // 59 irondeep (N) horde
-    { 0x54e, 0x0 },                                         // 60 irondeep (N) ally
-    { 0x54d, 0x1 },                                         // 61 mine (S) neutral
-    { 0x54c, 0x0 },                                         // 62 mine (S) horde
-    { 0x54b, 0x0 },                                         // 63 mine (S) ally
-    { 0x545, 0x0 },                                         // 64 iceblood h_a
-    { 0x543, 0x1 },                                         // 65 iceblod h_c
-    { 0x542, 0x0 },                                         // 66 iceblood a_c
-    { 0x540, 0x0 },                                         // 67 snowfall h_a
-    { 0x53f, 0x0 },                                         // 68 snowfall a_a
-    { 0x53e, 0x0 },                                         // 69 snowfall h_c
-    { 0x53d, 0x0 },                                         // 70 snowfall a_c
-    { 0x53c, 0x0 },                                         // 71 frostwolf g h_a
-    { 0x53b, 0x0 },                                         // 72 frostwolf g a_a
-    { 0x53a, 0x1 },                                         // 73 frostwolf g h_c
-    { 0x539, 0x0 },                                         // 74 frostwolf g a_c
-    { 0x538, 0x0 },                                         // 75 stormpike grave h_a
-    { 0x537, 0x0 },                                         // 76 stormpike grave a_a
-    { 0x534, 0x0 },                                         // 77 frostwolf hut h_a
-    { 0x533, 0x0 },                                         // 78 frostwolf hut a_a
-    { 0x530, 0x0 },                                         // 79 stormpike first aid h_a
-    { 0x52f, 0x0 },                                         // 80 stormpike first aid h_c
-    { 0x52d, 0x1 },                                         // 81 stormpike first aid a_c
+    { 0x7ae, 0x1 },                                         // 1966  7 snowfall n
+    { 0x532, 0x1 },                                         // 1330  8 frostwolfhut hc
+    { 0x531, 0x0 },                                         // 1329  9 frostwolfhut ac
+    { 0x52e, 0x0 },                                         // 1326 10 stormpike firstaid a_a
+    { 0x571, 0x0 },                                         // 1393 11 east frostwolf tower horde assaulted -unused
+    { 0x570, 0x0 },                                         // 1392 12 west frostwolf tower horde assaulted - unused
+    { 0x567, 0x1 },                                         // 1383 13 frostwolfe c
+    { 0x566, 0x1 },                                         // 1382 14 frostwolfw c
+    { 0x550, 0x1 },                                         // 1360 15 irondeep (N) ally
+    { 0x544, 0x0 },                                         // 1348 16 ice grave a_a
+    { 0x536, 0x0 },                                         // 1334 17 stormpike grave h_c
+    { 0x535, 0x1 },                                         // 1333 18 stormpike grave a_c
+    { 0x518, 0x0 },                                         // 1304 19 stoneheart grave a_a
+    { 0x517, 0x0 },                                         // 1303 20 stoneheart grave h_a
+    { 0x574, 0x0 },                                         // 1396 21 unk
+    { 0x573, 0x0 },                                         // 1395 22 iceblood tower horde assaulted -unused
+    { 0x572, 0x0 },                                         // 1394 23 towerpoint horde assaulted - unused
+    { 0x56f, 0x0 },                                         // 1391 24 unk
+    { 0x56e, 0x0 },                                         // 1390 25 iceblood a
+    { 0x56d, 0x0 },                                         // 1389 26 towerp a
+    { 0x56c, 0x0 },                                         // 1388 27 frostwolfe a
+    { 0x56b, 0x0 },                                         // 1387 28 froswolfw a
+    { 0x56a, 0x1 },                                         // 1386 29 unk
+    { 0x569, 0x1 },                                         // 1385 30 iceblood c
+    { 0x568, 0x1 },                                         // 1384 31 towerp c
+    { 0x565, 0x0 },                                         // 1381 32 stoneh tower a
+    { 0x564, 0x0 },                                         // 1380 33 icewing tower a
+    { 0x563, 0x0 },                                         // 1379 34 dunn a
+    { 0x562, 0x0 },                                         // 1378 35 duns a
+    { 0x561, 0x0 },                                         // 1377 36 stoneheart bunker alliance assaulted - unused
+    { 0x560, 0x0 },                                         // 1376 37 icewing bunker alliance assaulted - unused
+    { 0x55f, 0x0 },                                         // 1375 38 dunbaldar south alliance assaulted - unused
+    { 0x55e, 0x0 },                                         // 1374 39 dunbaldar north alliance assaulted - unused
+    { 0x55d, 0x0 },                                         // 1373 40 stone tower d
+    { 0x3c6, 0x0 },                                         //  966 41 unk
+    { 0x3c4, 0x0 },                                         //  964 42 unk
+    { 0x3c2, 0x0 },                                         //  962 43 unk
+    { 0x516, 0x1 },                                         // 1302 44 stoneheart grave a_c
+    { 0x515, 0x0 },                                         // 1301 45 stonheart grave h_c
+    { 0x3b6, 0x0 },                                         //  950 46 unk
+    { 0x55c, 0x0 },                                         // 1372 47 icewing tower d
+    { 0x55b, 0x0 },                                         // 1371 48 dunn d
+    { 0x55a, 0x0 },                                         // 1370 49 duns d
+    { 0x559, 0x0 },                                         // 1369 50 unk
+    { 0x558, 0x0 },                                         // 1368 51 iceblood d
+    { 0x557, 0x0 },                                         // 1367 52 towerp d
+    { 0x556, 0x0 },                                         // 1366 53 frostwolfe d
+    { 0x555, 0x0 },                                         // 1365 54 frostwolfw d
+    { 0x554, 0x1 },                                         // 1364 55 stoneh tower c
+    { 0x553, 0x1 },                                         // 1363 56 icewing tower c
+    { 0x552, 0x1 },                                         // 1362 57 dunn c
+    { 0x551, 0x1 },                                         // 1361 58 duns c
+    { 0x54f, 0x0 },                                         // 1359 59 irondeep (N) horde
+    { 0x54e, 0x0 },                                         // 1358 60 irondeep (N) ally
+    { 0x54d, 0x1 },                                         // 1357 61 mine (S) neutral
+    { 0x54c, 0x0 },                                         // 1356 62 mine (S) horde
+    { 0x54b, 0x0 },                                         // 1355 63 mine (S) ally
+    { 0x545, 0x0 },                                         // 1349 64 iceblood h_a
+    { 0x543, 0x1 },                                         // 1347 65 iceblod h_c
+    { 0x542, 0x0 },                                         // 1346 66 iceblood a_c
+    { 0x540, 0x0 },                                         // 1344 67 snowfall h_a
+    { 0x53f, 0x0 },                                         // 1343 68 snowfall a_a
+    { 0x53e, 0x0 },                                         // 1342 69 snowfall h_c
+    { 0x53d, 0x0 },                                         // 1341 70 snowfall a_c
+    { 0x53c, 0x0 },                                         // 1340 71 frostwolf g h_a
+    { 0x53b, 0x0 },                                         // 1339 72 frostwolf g a_a
+    { 0x53a, 0x1 },                                         // 1338 73 frostwolf g h_c
+    { 0x539, 0x0 },                                         // l33t 74 frostwolf g a_c
+    { 0x538, 0x0 },                                         // 1336 75 stormpike grave h_a
+    { 0x537, 0x0 },                                         // 1335 76 stormpike grave a_a
+    { 0x534, 0x0 },                                         // 1332 77 frostwolf hut h_a
+    { 0x533, 0x0 },                                         // 1331 78 frostwolf hut a_a
+    { 0x530, 0x0 },                                         // 1328 79 stormpike first aid h_a
+    { 0x52f, 0x0 },                                         // 1327 80 stormpike first aid h_c
+    { 0x52d, 0x1 },                                         // 1325 81 stormpike first aid a_c
     { 0x0,   0x0 }
 };
 
 static WorldStatePair WS_world_states[] =
 {
-    { 0x62d, 0x0 },                                         // 7 1581 alliance flag captures
-    { 0x62e, 0x0 },                                         // 8 1582 horde flag captures
-    { 0x609, 0x0 },                                         // 9 1545 unk, set to 1 on alliance flag pickup...
-    { 0x60a, 0x0 },                                         // 10 1546 unk, set to 1 on horde flag pickup, after drop it's -1
-    { 0x60b, 0x2 },                                         // 11 1547 unk
-    { 0x641, 0x3 },                                         // 12 1601 unk (max flag captures?)
-    { 0x922, 0x1 },                                         // 13 2338 horde (0 - hide, 1 - flag ok, 2 - flag picked up (flashing), 3 - flag picked up (not flashing)
-    { 0x923, 0x1 },                                         // 14 2339 alliance (0 - hide, 1 - flag ok, 2 - flag picked up (flashing), 3 - flag picked up (not flashing)
-    { 0x1097,0x1 },                                         // 15 4247 show time limit?
-    { 0x1098,0x19 },                                        // 16 4248 time remaining in minutes
+    { 0x62d, 0x0 },                                         // 1581  7 alliance flag captures
+    { 0x62e, 0x0 },                                         // 1582  8 horde flag captures
+    { 0x609, 0x0 },                                         // 1545  9 unk, set to 1 on alliance flag pickup...
+    { 0x60a, 0x0 },                                         // 1546 10 unk, set to 1 on horde flag pickup, after drop it's -1
+    { 0x60b, 0x2 },                                         // 1547 11 unk
+    { 0x641, 0x3 },                                         // 1601 12 unk (max flag captures?)
+    { 0x922, 0x1 },                                         // 2338 13 horde (0 - hide, 1 - flag ok, 2 - flag picked up (flashing), 3 - flag picked up (not flashing)
+    { 0x923, 0x1 },                                         // 2339 14 alliance (0 - hide, 1 - flag ok, 2 - flag picked up (flashing), 3 - flag picked up (not flashing)
+    { 0x1097,0x1 },                                         // 4247 15 show time limit?
+    { 0x1098,0x19 },                                        // 4248 16 time remaining in minutes
     { 0x0,   0x0 }
 };
 
 static WorldStatePair AB_world_states[] =
 {
-    { 0x6e7, 0x0 },                                         // 7 1767 stables alliance
-    { 0x6e8, 0x0 },                                         // 8 1768 stables horde
-    { 0x6e9, 0x0 },                                         // 9 1769 unk, ST?
-    { 0x6ea, 0x0 },                                         // 10 1770 stables (show/hide)
-    { 0x6ec, 0x0 },                                         // 11 1772 farm (0 - horde controlled, 1 - alliance controlled)
-    { 0x6ed, 0x0 },                                         // 12 1773 farm (show/hide)
-    { 0x6ee, 0x0 },                                         // 13 1774 farm color
-    { 0x6ef, 0x0 },                                         // 14 1775 gold mine color, may be FM?
-    { 0x6f0, 0x0 },                                         // 15 1776 alliance resources
-    { 0x6f1, 0x0 },                                         // 16 1777 horde resources
-    { 0x6f2, 0x0 },                                         // 17 1778 horde bases
-    { 0x6f3, 0x0 },                                         // 18 1779 alliance bases
-    { 0x6f4, 0x7d0 },                                       // 19 1780 max resources (2000)
-    { 0x6f6, 0x0 },                                         // 20 1782 blacksmith color
-    { 0x6f7, 0x0 },                                         // 21 1783 blacksmith (show/hide)
-    { 0x6f8, 0x0 },                                         // 22 1784 unk, bs?
-    { 0x6f9, 0x0 },                                         // 23 1785 unk, bs?
-    { 0x6fb, 0x0 },                                         // 24 1787 gold mine (0 - horde contr, 1 - alliance contr)
-    { 0x6fc, 0x0 },                                         // 25 1788 gold mine (0 - conflict, 1 - horde)
-    { 0x6fd, 0x0 },                                         // 26 1789 gold mine (1 - show/0 - hide)
-    { 0x6fe, 0x0 },                                         // 27 1790 gold mine color
-    { 0x700, 0x0 },                                         // 28 1792 gold mine color, wtf?, may be LM?
-    { 0x701, 0x0 },                                         // 29 1793 lumber mill color (0 - conflict, 1 - horde contr)
-    { 0x702, 0x0 },                                         // 30 1794 lumber mill (show/hide)
-    { 0x703, 0x0 },                                         // 31 1795 lumber mill color color
-    { 0x732, 0x1 },                                         // 32 1842 stables (1 - uncontrolled)
-    { 0x733, 0x1 },                                         // 33 1843 gold mine (1 - uncontrolled)
-    { 0x734, 0x1 },                                         // 34 1844 lumber mill (1 - uncontrolled)
-    { 0x735, 0x1 },                                         // 35 1845 farm (1 - uncontrolled)
-    { 0x736, 0x1 },                                         // 36 1846 blacksmith (1 - uncontrolled)
-    { 0x745, 0x2 },                                         // 37 1861 unk
-    { 0x7a3, 0x708 },                                       // 38 1955 warning limit (1800)
+    { 0x6e7, 0x0 },                                         // 1767  7 stables alliance
+    { 0x6e8, 0x0 },                                         // 1768  8 stables horde
+    { 0x6e9, 0x0 },                                         // 1769  9 unk, ST?
+    { 0x6ea, 0x0 },                                         // 1770 10 stables (show/hide)
+    { 0x6ec, 0x0 },                                         // 1772 11 farm (0 - horde controlled, 1 - alliance controlled)
+    { 0x6ed, 0x0 },                                         // 1773 12 farm (show/hide)
+    { 0x6ee, 0x0 },                                         // 1774 13 farm color
+    { 0x6ef, 0x0 },                                         // 1775 14 gold mine color, may be FM?
+    { 0x6f0, 0x0 },                                         // 1776 15 alliance resources
+    { 0x6f1, 0x0 },                                         // 1777 16 horde resources
+    { 0x6f2, 0x0 },                                         // 1778 17 horde bases
+    { 0x6f3, 0x0 },                                         // 1779 18 alliance bases
+    { 0x6f4, 0x7d0 },                                       // 1780 19 max resources (2000)
+    { 0x6f6, 0x0 },                                         // 1782 20 blacksmith color
+    { 0x6f7, 0x0 },                                         // 1783 21 blacksmith (show/hide)
+    { 0x6f8, 0x0 },                                         // 1784 22 unk, bs?
+    { 0x6f9, 0x0 },                                         // 1785 23 unk, bs?
+    { 0x6fb, 0x0 },                                         // 1787 24 gold mine (0 - horde contr, 1 - alliance contr)
+    { 0x6fc, 0x0 },                                         // 1788 25 gold mine (0 - conflict, 1 - horde)
+    { 0x6fd, 0x0 },                                         // 1789 26 gold mine (1 - show/0 - hide)
+    { 0x6fe, 0x0 },                                         // 1790 27 gold mine color
+    { 0x700, 0x0 },                                         // 1792 28 gold mine color, wtf?, may be LM?
+    { 0x701, 0x0 },                                         // 1793 29 lumber mill color (0 - conflict, 1 - horde contr)
+    { 0x702, 0x0 },                                         // 1794 30 lumber mill (show/hide)
+    { 0x703, 0x0 },                                         // 1795 31 lumber mill color color
+    { 0x732, 0x1 },                                         // 1842 32 stables (1 - uncontrolled)
+    { 0x733, 0x1 },                                         // 1843 33 gold mine (1 - uncontrolled)
+    { 0x734, 0x1 },                                         // 1844 34 lumber mill (1 - uncontrolled)
+    { 0x735, 0x1 },                                         // 1845 35 farm (1 - uncontrolled)
+    { 0x736, 0x1 },                                         // 1846 36 blacksmith (1 - uncontrolled)
+    { 0x745, 0x2 },                                         // 1861 37 unk
+    { 0x7a3, 0x708 },                                       // 1955 38 warning limit (1800)
     { 0x0,   0x0 }
 };
 
 static WorldStatePair EY_world_states[] =
 {
-    { 0xac1, 0x0 },                                         // 7  2753 Horde Bases
-    { 0xac0, 0x0 },                                         // 8  2752 Alliance Bases
-    { 0xab6, 0x0 },                                         // 9  2742 Mage Tower - Horde conflict
-    { 0xab5, 0x0 },                                         // 10 2741 Mage Tower - Alliance conflict
-    { 0xab4, 0x0 },                                         // 11 2740 Fel Reaver - Horde conflict
-    { 0xab3, 0x0 },                                         // 12 2739 Fel Reaver - Alliance conflict
-    { 0xab2, 0x0 },                                         // 13 2738 Draenei - Alliance conflict
-    { 0xab1, 0x0 },                                         // 14 2737 Draenei - Horde conflict
-    { 0xab0, 0x0 },                                         // 15 2736 unk // 0 at start
-    { 0xaaf, 0x0 },                                         // 16 2735 unk // 0 at start
-    { 0xaad, 0x0 },                                         // 17 2733 Draenei - Horde control
-    { 0xaac, 0x0 },                                         // 18 2732 Draenei - Alliance control
-    { 0xaab, 0x1 },                                         // 19 2731 Draenei uncontrolled (1 - yes, 0 - no)
-    { 0xaaa, 0x0 },                                         // 20 2730 Mage Tower - Alliance control
-    { 0xaa9, 0x0 },                                         // 21 2729 Mage Tower - Horde control
-    { 0xaa8, 0x1 },                                         // 22 2728 Mage Tower uncontrolled (1 - yes, 0 - no)
-    { 0xaa7, 0x0 },                                         // 23 2727 Fel Reaver - Horde control
-    { 0xaa6, 0x0 },                                         // 24 2726 Fel Reaver - Alliance control
-    { 0xaa5, 0x1 },                                         // 25 2725 Fel Reaver uncontrolled (1 - yes, 0 - no)
-    { 0xaa4, 0x0 },                                         // 26 2724 Boold Elf - Horde control
-    { 0xaa3, 0x0 },                                         // 27 2723 Boold Elf - Alliance control
-    { 0xaa2, 0x1 },                                         // 28 2722 Boold Elf uncontrolled (1 - yes, 0 - no)
-    { 0xac5, 0x1 },                                         // 29 2757 Flag (1 - show, 0 - hide) - doesn't work exactly this way!
-    { 0xad2, 0x1 },                                         // 30 2770 Horde top-stats (1 - show, 0 - hide) // 02 -> horde picked up the flag
-    { 0xad1, 0x1 },                                         // 31 2769 Alliance top-stats (1 - show, 0 - hide) // 02 -> alliance picked up the flag
-    { 0xabe, 0x0 },                                         // 32 2750 Horde resources
-    { 0xabd, 0x0 },                                         // 33 2749 Alliance resources
-    { 0xa05, 0x8e },                                        // 34 2565 unk, constant?
-    { 0xaa0, 0x0 },                                         // 35 2720 Capturing progress-bar (100 -> empty (only grey), 0 -> blue|red (no grey), default 0)
-    { 0xa9f, 0x0 },                                         // 36 2719 Capturing progress-bar (0 - left, 100 - right)
-    { 0xa9e, 0x0 },                                         // 37 2718 Capturing progress-bar (1 - show, 0 - hide)
-    { 0xc0d, 0x17b },                                       // 38 3085 unk
+    { 0xac1, 0x0 },                                         // 2753  7 Horde Bases
+    { 0xac0, 0x0 },                                         // 2752  8 Alliance Bases
+    { 0xab6, 0x0 },                                         // 2742  9 Mage Tower - Horde conflict
+    { 0xab5, 0x0 },                                         // 2741 10 Mage Tower - Alliance conflict
+    { 0xab4, 0x0 },                                         // 2740 11 Fel Reaver - Horde conflict
+    { 0xab3, 0x0 },                                         // 2739 12 Fel Reaver - Alliance conflict
+    { 0xab2, 0x0 },                                         // 2738 13 Draenei - Alliance conflict
+    { 0xab1, 0x0 },                                         // 2737 14 Draenei - Horde conflict
+    { 0xab0, 0x0 },                                         // 2736 15 unk // 0 at start
+    { 0xaaf, 0x0 },                                         // 2735 16 unk // 0 at start
+    { 0xaad, 0x0 },                                         // 2733 17 Draenei - Horde control
+    { 0xaac, 0x0 },                                         // 2732 18 Draenei - Alliance control
+    { 0xaab, 0x1 },                                         // 2731 19 Draenei uncontrolled (1 - yes, 0 - no)
+    { 0xaaa, 0x0 },                                         // 2730 20 Mage Tower - Alliance control
+    { 0xaa9, 0x0 },                                         // 2729 21 Mage Tower - Horde control
+    { 0xaa8, 0x1 },                                         // 2728 22 Mage Tower uncontrolled (1 - yes, 0 - no)
+    { 0xaa7, 0x0 },                                         // 2727 23 Fel Reaver - Horde control
+    { 0xaa6, 0x0 },                                         // 2726 24 Fel Reaver - Alliance control
+    { 0xaa5, 0x1 },                                         // 2725 25 Fel Reaver uncontrolled (1 - yes, 0 - no)
+    { 0xaa4, 0x0 },                                         // 2724 26 Boold Elf - Horde control
+    { 0xaa3, 0x0 },                                         // 2723 27 Boold Elf - Alliance control
+    { 0xaa2, 0x1 },                                         // 2722 28 Boold Elf uncontrolled (1 - yes, 0 - no)
+    { 0xac5, 0x1 },                                         // 2757 29 Flag (1 - show, 0 - hide) - doesn't work exactly this way!
+    { 0xad2, 0x1 },                                         // 2770 30 Horde top-stats (1 - show, 0 - hide) // 02 -> horde picked up the flag
+    { 0xad1, 0x1 },                                         // 2769 31 Alliance top-stats (1 - show, 0 - hide) // 02 -> alliance picked up the flag
+    { 0xabe, 0x0 },                                         // 2750 32 Horde resources
+    { 0xabd, 0x0 },                                         // 2749 33 Alliance resources
+    { 0xa05, 0x8e },                                        // 2565 34 unk, constant?
+    { 0xaa0, 0x0 },                                         // 2720 35 Capturing progress-bar (100 -> empty (only grey), 0 -> blue|red (no grey), default 0)
+    { 0xa9f, 0x0 },                                         // 2719 36 Capturing progress-bar (0 - left, 100 - right)
+    { 0xa9e, 0x0 },                                         // 2718 37 Capturing progress-bar (1 - show, 0 - hide)
+    { 0xc0d, 0x17b },                                       // 3085 38 unk
     // and some more ... unknown
     { 0x0,   0x0 }
 };
 
 static WorldStatePair HP_world_states[] =                   // Hellfire Peninsula
 {
-    { 0x9ba, 0x1 },                                         // 10
-    { 0x9b9, 0x1 },                                         // 11
-    { 0x9b5, 0x0 },                                         // 12
-    { 0x9b4, 0x1 },                                         // 13
-    { 0x9b3, 0x0 },                                         // 14
-    { 0x9b2, 0x0 },                                         // 15
-    { 0x9b1, 0x1 },                                         // 16
-    { 0x9b0, 0x0 },                                         // 17
-    { 0x9ae, 0x0 },                                         // 18 horde pvp objectives captured
-    { 0x9ac, 0x0 },                                         // 19
-    { 0x9a8, 0x0 },                                         // 20
-    { 0x9a7, 0x0 },                                         // 21
-    { 0x9a6, 0x1 },                                         // 22
+    { 0x9ba, 0x1 },                                         // 2490 10
+    { 0x9b9, 0x1 },                                         // 2489 11
+    { 0x9b5, 0x0 },                                         // 2485 12
+    { 0x9b4, 0x1 },                                         // 2484 13
+    { 0x9b3, 0x0 },                                         // 2483 14
+    { 0x9b2, 0x0 },                                         // 2482 15
+    { 0x9b1, 0x1 },                                         // 2481 16
+    { 0x9b0, 0x0 },                                         // 2480 17
+    { 0x9ae, 0x0 },                                         // 2478 18 horde pvp objectives captured
+    { 0x9ac, 0x0 },                                         // 2476 19
+    { 0x9a8, 0x0 },                                         // 2472 20
+    { 0x9a7, 0x0 },                                         // 2471 21
+    { 0x9a6, 0x1 },                                         // 2470 22
     { 0x0,   0x0 }
 };
 
 static WorldStatePair TF_world_states[] =                   // Terokkar Forest
 {
-    { 0xa41, 0x0 },                                         // 10
-    { 0xa40, 0x14 },                                        // 11
-    { 0xa3f, 0x0 },                                         // 12
-    { 0xa3e, 0x0 },                                         // 13
-    { 0xa3d, 0x5 },                                         // 14
-    { 0xa3c, 0x0 },                                         // 15
-    { 0xa87, 0x0 },                                         // 16
-    { 0xa86, 0x0 },                                         // 17
-    { 0xa85, 0x0 },                                         // 18
-    { 0xa84, 0x0 },                                         // 19
-    { 0xa83, 0x0 },                                         // 20
-    { 0xa82, 0x0 },                                         // 21
-    { 0xa81, 0x0 },                                         // 22
-    { 0xa80, 0x0 },                                         // 23
-    { 0xa7e, 0x0 },                                         // 24
-    { 0xa7d, 0x0 },                                         // 25
-    { 0xa7c, 0x0 },                                         // 26
-    { 0xa7b, 0x0 },                                         // 27
-    { 0xa7a, 0x0 },                                         // 28
-    { 0xa79, 0x0 },                                         // 29
-    { 0x9d0, 0x5 },                                         // 30
-    { 0x9ce, 0x0 },                                         // 31
-    { 0x9cd, 0x0 },                                         // 32
-    { 0x9cc, 0x0 },                                         // 33
-    { 0xa88, 0x0 },                                         // 34
-    { 0xad0, 0x0 },                                         // 35
-    { 0xacf, 0x1 },                                         // 36
+    { 0xa41, 0x0 },                                         // 2625 10
+    { 0xa40, 0x14 },                                        // 2624 11
+    { 0xa3f, 0x0 },                                         // 2623 12
+    { 0xa3e, 0x0 },                                         // 2622 13
+    { 0xa3d, 0x5 },                                         // 2621 14
+    { 0xa3c, 0x0 },                                         // 2620 15
+    { 0xa87, 0x0 },                                         // 2695 16
+    { 0xa86, 0x0 },                                         // 2694 17
+    { 0xa85, 0x0 },                                         // 2693 18
+    { 0xa84, 0x0 },                                         // 2692 19
+    { 0xa83, 0x0 },                                         // 2691 20
+    { 0xa82, 0x0 },                                         // 2690 21
+    { 0xa81, 0x0 },                                         // 2689 22
+    { 0xa80, 0x0 },                                         // 2688 23
+    { 0xa7e, 0x0 },                                         // 2686 24
+    { 0xa7d, 0x0 },                                         // 2685 25
+    { 0xa7c, 0x0 },                                         // 2684 26
+    { 0xa7b, 0x0 },                                         // 2683 27
+    { 0xa7a, 0x0 },                                         // 2682 28
+    { 0xa79, 0x0 },                                         // 2681 29
+    { 0x9d0, 0x5 },                                         // 2512 30
+    { 0x9ce, 0x0 },                                         // 2510 31
+    { 0x9cd, 0x0 },                                         // 2509 32
+    { 0x9cc, 0x0 },                                         // 2508 33
+    { 0xa88, 0x0 },                                         // 2696 34
+    { 0xad0, 0x0 },                                         // 2768 35
+    { 0xacf, 0x1 },                                         // 2767 36
     { 0x0,   0x0 }
 };
 
-static WorldStatePair ZM_world_states[] =                   // Terokkar Forest
+static WorldStatePair ZM_world_states[] =                   // Zangarmarsh
 {
-    { 0x9e1, 0x0 },                                         // 10
-    { 0x9e0, 0x0 },                                         // 11
-    { 0x9df, 0x0 },                                         // 12
-    { 0xa5d, 0x1 },                                         // 13
-    { 0xa5c, 0x0 },                                         // 14
-    { 0xa5b, 0x1 },                                         // 15
-    { 0xa5a, 0x0 },                                         // 16
-    { 0xa59, 0x1 },                                         // 17
-    { 0xa58, 0x0 },                                         // 18
-    { 0xa57, 0x0 },                                         // 19
-    { 0xa56, 0x0 },                                         // 20
-    { 0xa55, 0x1 },                                         // 21
-    { 0xa54, 0x0 },                                         // 22
-    { 0x9e7, 0x0 },                                         // 23
-    { 0x9e6, 0x0 },                                         // 24
-    { 0x9e5, 0x0 },                                         // 25
-    { 0xa00, 0x0 },                                         // 26
-    { 0x9ff, 0x1 },                                         // 27
-    { 0x9fe, 0x0 },                                         // 28
-    { 0x9fd, 0x0 },                                         // 29
-    { 0x9fc, 0x1 },                                         // 30
-    { 0x9fb, 0x0 },                                         // 31
-    { 0xa62, 0x0 },                                         // 32
-    { 0xa61, 0x1 },                                         // 33
-    { 0xa60, 0x1 },                                         // 34
-    { 0xa5f, 0x0 },                                         // 35
+    { 0x9e1, 0x0 },                                         // 2529 10
+    { 0x9e0, 0x0 },                                         // 2528 11
+    { 0x9df, 0x0 },                                         // 2527 12
+    { 0xa5d, 0x1 },                                         // 2526 13
+    { 0xa5c, 0x0 },                                         // 2525 14
+    { 0xa5b, 0x1 },                                         // 2524 15
+    { 0xa5a, 0x0 },                                         // 2523 16
+    { 0xa59, 0x1 },                                         // 2649 17
+    { 0xa58, 0x0 },                                         // 2648 18
+    { 0xa57, 0x0 },                                         // 2647 19
+    { 0xa56, 0x0 },                                         // 2646 20
+    { 0xa55, 0x1 },                                         // 2645 21
+    { 0xa54, 0x0 },                                         // 2644 22
+    { 0x9e7, 0x0 },                                         // 2535 23
+    { 0x9e6, 0x0 },                                         // 2534 24
+    { 0x9e5, 0x0 },                                         // 2533 25
+    { 0xa00, 0x0 },                                         // 2560 26
+    { 0x9ff, 0x1 },                                         // 2559 27
+    { 0x9fe, 0x0 },                                         // 2558 28
+    { 0x9fd, 0x0 },                                         // 2557 29
+    { 0x9fc, 0x1 },                                         // 2556 30
+    { 0x9fb, 0x0 },                                         // 2555 31
+    { 0xa62, 0x0 },                                         // 2658 32
+    { 0xa61, 0x1 },                                         // 2657 33
+    { 0xa60, 0x1 },                                         // 2656 34
+    { 0xa5f, 0x0 },                                         // 2655 35
     { 0x0,   0x0 }
 };
 
@@ -8504,22 +8510,22 @@ void Player::SendInitWorldStates(uint32 zoneid, uint32 areaid)
     data << uint16(0);                                      // count of uint64 blocks, placeholder
 
     // common fields
-    FillInitialWorldState(data, count, 0x8d8, 0x0);         // 1
-    FillInitialWorldState(data, count, 0x8d7, 0x0);         // 2
-    FillInitialWorldState(data, count, 0x8d6, 0x0);         // 3
-    FillInitialWorldState(data, count, 0x8d5, 0x0);         // 4
-    FillInitialWorldState(data, count, 0x8d4, 0x0);         // 5
-    FillInitialWorldState(data, count, 0x8d3, 0x0);         // 6
-                                                            // 7 1 - Arena season in progress, 0 - end of season
-    FillInitialWorldState(data, count, 0xC77, sWorld.getConfig(CONFIG_BOOL_ARENA_SEASON_IN_PROGRESS));
-                                                            // 8 Arena season id
-    FillInitialWorldState(data, count, 0xF3D, sWorld.getConfig(CONFIG_UINT32_ARENA_SEASON_ID));
+    FillInitialWorldState(data, count, 0x8d8, 0x0);         // 2264 1
+    FillInitialWorldState(data, count, 0x8d7, 0x0);         // 2263 2
+    FillInitialWorldState(data, count, 0x8d6, 0x0);         // 2262 3
+    FillInitialWorldState(data, count, 0x8d5, 0x0);         // 2261 4
+    FillInitialWorldState(data, count, 0x8d4, 0x0);         // 2260 5
+    FillInitialWorldState(data, count, 0x8d3, 0x0);         // 2259 6
+                                                            // 3191 7 Current arena season
+    FillInitialWorldState(data, count, 0xC77, sWorld.getConfig(CONFIG_UINT32_ARENA_SEASON_ID));
+                                                            // 3901 8 Previous arena season
+    FillInitialWorldState(data, count, 0xF3D, sWorld.getConfig(CONFIG_UINT32_ARENA_SEASON_PREVIOUS_ID));
 
     if(mapid == 530)                                        // Outland
     {
-        FillInitialWorldState(data, count, 0x9bf, 0x0);
-        FillInitialWorldState(data, count, 0x9bd, 0xF);
-        FillInitialWorldState(data, count, 0x9bb, 0xF);
+        FillInitialWorldState(data, count, 0x9bf, 0x0);     // 2495
+        FillInitialWorldState(data, count, 0x9bd, 0xF);     // 2493
+        FillInitialWorldState(data, count, 0x9bb, 0xF);     // 2491
     }
     switch(zoneid)
     {
@@ -8571,9 +8577,9 @@ void Player::SendInitWorldStates(uint32 zoneid, uint32 areaid)
                 bg->FillInitialWorldStates(data, count);
             else
             {
-                FillInitialWorldState(data,count,0xa0f,0x0);// 7
-                FillInitialWorldState(data,count,0xa10,0x0);// 8
-                FillInitialWorldState(data,count,0xa11,0x0);// 9 show
+                FillInitialWorldState(data,count,0xa0f,0x0);// 2575 7
+                FillInitialWorldState(data,count,0xa10,0x0);// 2576 8
+                FillInitialWorldState(data,count,0xa11,0x0);// 2577 9 show
             }
             break;
         case 3702:                                          // Blade's Edge Arena
@@ -8581,9 +8587,9 @@ void Player::SendInitWorldStates(uint32 zoneid, uint32 areaid)
                 bg->FillInitialWorldStates(data, count);
             else
             {
-                FillInitialWorldState(data,count,0x9f0,0x0);// 7 gold
-                FillInitialWorldState(data,count,0x9f1,0x0);// 8 green
-                FillInitialWorldState(data,count,0x9f3,0x0);// 9 show
+                FillInitialWorldState(data,count,0x9f0,0x0);// 2544 7 gold
+                FillInitialWorldState(data,count,0x9f1,0x0);// 2545 8 green
+                FillInitialWorldState(data,count,0x9f3,0x0);// 2547 9 show
             }
             break;
         case 3968:                                          // Ruins of Lordaeron
@@ -8591,27 +8597,26 @@ void Player::SendInitWorldStates(uint32 zoneid, uint32 areaid)
                 bg->FillInitialWorldStates(data, count);
             else
             {
-                FillInitialWorldState(data,count,0xbb8,0x0);// 7 gold
-                FillInitialWorldState(data,count,0xbb9,0x0);// 8 green
-                FillInitialWorldState(data,count,0xbba,0x0);// 9 show
+                FillInitialWorldState(data,count,0xbb8,0x0);// 3000 7 gold
+                FillInitialWorldState(data,count,0xbb9,0x0);// 3001 8 green
+                FillInitialWorldState(data,count,0xbba,0x0);// 3002 9 show
             }
             break;
         case 3703:                                          // Shattrath City
             break;
         default:
-            FillInitialWorldState(data,count, 0x914, 0x0);  // 7
-            FillInitialWorldState(data,count, 0x913, 0x0);  // 8
-            FillInitialWorldState(data,count, 0x912, 0x0);  // 9
-            FillInitialWorldState(data,count, 0x915, 0x0);  // 10
+            FillInitialWorldState(data,count, 0x914, 0x0);  // 2324 7
+            FillInitialWorldState(data,count, 0x913, 0x0);  // 2323 8
+            FillInitialWorldState(data,count, 0x912, 0x0);  // 2322 9
+            FillInitialWorldState(data,count, 0x915, 0x0);  // 2325 10
             break;
     }
 
     FillBGWeekendWorldStates(data,count);
 
-    data.put<uint16>(count_pos,count);                     // set actual world state amount
+    data.put<uint16>(count_pos,count);                      // set actual world state amount
 
     GetSession()->SendPacket(&data);
-
 }
 
 void Player::FillBGWeekendWorldStates(WorldPacket& data, uint32& count)
@@ -8642,17 +8647,17 @@ uint32 Player::GetXPRestBonus(uint32 xp)
     return rested_bonus;
 }
 
-void Player::SetBindPoint(uint64 guid)
+void Player::SetBindPoint(ObjectGuid guid)
 {
     WorldPacket data(SMSG_BINDER_CONFIRM, 8);
-    data << uint64(guid);
+    data << ObjectGuid(guid);
     GetSession()->SendPacket( &data );
 }
 
-void Player::SendTalentWipeConfirm(uint64 guid)
+void Player::SendTalentWipeConfirm(ObjectGuid guid)
 {
     WorldPacket data(MSG_TALENT_WIPE_CONFIRM, (8+4));
-    data << uint64(guid);
+    data << ObjectGuid(guid);
     data << uint32(resetTalentsCost());
     GetSession()->SendPacket( &data );
 }
@@ -8674,7 +8679,7 @@ void Player::SendPetSkillWipeConfirm()
 
 void Player::SetVirtualItemSlot( uint8 i, Item* item)
 {
-    ASSERT(i < 3);
+    MANGOS_ASSERT(i < 3);
     if(i < 2 && item)
     {
         if(!item->GetEnchantmentId(TEMP_ENCHANTMENT_SLOT))
@@ -9149,7 +9154,7 @@ Item* Player::GetWeaponForAttack(WeaponAttackType attackType, bool nonbroken, bo
     if (!item || item->GetProto()->Class != ITEM_CLASS_WEAPON)
         return NULL;
 
-    if (useable && !IsUseEquipedWeapon(attackType==BASE_ATTACK))
+    if (useable && !IsUseEquippedWeapon(attackType==BASE_ATTACK))
         return NULL;
 
     if (nonbroken && item->IsBroken())
@@ -9724,14 +9729,6 @@ uint8 Player::_CanStoreItem( uint8 bag, uint8 slot, ItemPosCountVec &dest, uint3
 
     if (pItem)
     {
-        // item used
-        if(pItem->m_lootGenerated)
-        {
-            if (no_space_count)
-                *no_space_count = count;
-            return EQUIP_ERR_ALREADY_LOOTED;
-        }
-
         if (pItem->IsBindedNotWith(this))
         {
             if (no_space_count)
@@ -10219,10 +10216,6 @@ uint8 Player::CanStoreItems( Item **pItems,int count) const
         if( !pProto )
             return EQUIP_ERR_ITEM_NOT_FOUND;
 
-        // item used
-        if(pItem->m_lootGenerated)
-            return EQUIP_ERR_ALREADY_LOOTED;
-
         // item it 'bind'
         if(pItem->IsBindedNotWith(this))
             return EQUIP_ERR_DONT_OWN_THAT_ITEM;
@@ -10426,10 +10419,6 @@ uint8 Player::CanEquipItem( uint8 slot, uint16 &dest, Item *pItem, bool swap, bo
         ItemPrototype const *pProto = pItem->GetProto();
         if( pProto )
         {
-            // item used
-            if(pItem->m_lootGenerated)
-                return EQUIP_ERR_ALREADY_LOOTED;
-
             if(pItem->IsBindedNotWith(this))
                 return EQUIP_ERR_DONT_OWN_THAT_ITEM;
 
@@ -10558,24 +10547,20 @@ uint8 Player::CanEquipItem( uint8 slot, uint16 &dest, Item *pItem, bool swap, bo
 uint8 Player::CanUnequipItem( uint16 pos, bool swap ) const
 {
     // Applied only to equipped items and bank bags
-    if(!IsEquipmentPos(pos) && !IsBagPos(pos))
+    if (!IsEquipmentPos(pos) && !IsBagPos(pos))
         return EQUIP_ERR_OK;
 
     Item* pItem = GetItemByPos(pos);
 
     // Applied only to existing equipped item
-    if( !pItem )
+    if (!pItem)
         return EQUIP_ERR_OK;
 
     DEBUG_LOG( "STORAGE: CanUnequipItem slot = %u, item = %u, count = %u", pos, pItem->GetEntry(), pItem->GetCount());
 
     ItemPrototype const *pProto = pItem->GetProto();
-    if( !pProto )
+    if (!pProto)
         return EQUIP_ERR_ITEM_NOT_FOUND;
-
-    // item used
-    if(pItem->m_lootGenerated)
-        return EQUIP_ERR_ALREADY_LOOTED;
 
     // do not allow unequipping gear except weapons, offhands, projectiles, relics in
     // - combat
@@ -10607,10 +10592,6 @@ uint8 Player::CanBankItem( uint8 bag, uint8 slot, ItemPosCountVec &dest, Item *p
     ItemPrototype const *pProto = pItem->GetProto();
     if (!pProto)
         return swap ? EQUIP_ERR_ITEMS_CANT_BE_SWAPPED : EQUIP_ERR_ITEM_NOT_FOUND;
-
-    // item used
-    if(pItem->m_lootGenerated)
-        return EQUIP_ERR_ALREADY_LOOTED;
 
     if (pItem->IsBindedNotWith(this))
         return EQUIP_ERR_DONT_OWN_THAT_ITEM;
@@ -10838,7 +10819,9 @@ uint8 Player::CanUseItem( Item *pItem, bool not_loading ) const
                 }
             }
 
-            if (pProto->RequiredReputationFaction && uint32(GetReputationRank(pProto->RequiredReputationFaction)) < pProto->RequiredReputationRank)
+            // reputation for BOA items checked only at buy/quest rewarding (quest accepting in fact by quest rep requirements)
+            if (!(pProto->Flags & ITEM_FLAG_BOA) && pProto->RequiredReputationFaction &&
+                uint32(GetReputationRank(pProto->RequiredReputationFaction)) < pProto->RequiredReputationRank)
                 return EQUIP_ERR_CANT_EQUIP_REPUTATION;
 
             return EQUIP_ERR_OK;
@@ -10853,10 +10836,10 @@ uint8 Player::CanUseItem( ItemPrototype const *pProto ) const
 
     if( pProto )
     {
-        if ((pProto->Flags2 & ITEM_FLAGS2_HORDE_ONLY) && GetTeam() != HORDE)
+        if ((pProto->Flags2 & ITEM_FLAG2_HORDE_ONLY) && GetTeam() != HORDE)
             return EQUIP_ERR_YOU_CAN_NEVER_USE_THAT_ITEM;
 
-        if ((pProto->Flags2 & ITEM_FLAGS2_ALLIANCE_ONLY) && GetTeam() != ALLIANCE)
+        if ((pProto->Flags2 & ITEM_FLAG2_ALLIANCE_ONLY) && GetTeam() != ALLIANCE)
             return EQUIP_ERR_YOU_CAN_NEVER_USE_THAT_ITEM;
 
         if ((pProto->AllowableClass & getClassMask()) == 0 || (pProto->AllowableRace & getRaceMask()) == 0)
@@ -11016,7 +10999,7 @@ Item* Player::_StoreItem( uint16 pos, Item *pItem, uint32 count, bool clone, boo
 
         if (pItem->GetProto()->Bonding == BIND_WHEN_PICKED_UP ||
             pItem->GetProto()->Bonding == BIND_QUEST_ITEM ||
-            (pItem->GetProto()->Bonding == BIND_WHEN_EQUIPED && IsBagPos(pos)))
+            (pItem->GetProto()->Bonding == BIND_WHEN_EQUIPPED && IsBagPos(pos)))
             pItem->SetBinding( true );
 
         if (bag == INVENTORY_SLOT_BAG_0)
@@ -11062,7 +11045,7 @@ Item* Player::_StoreItem( uint16 pos, Item *pItem, uint32 count, bool clone, boo
     {
         if (pItem2->GetProto()->Bonding == BIND_WHEN_PICKED_UP ||
             pItem2->GetProto()->Bonding == BIND_QUEST_ITEM ||
-            (pItem2->GetProto()->Bonding == BIND_WHEN_EQUIPED && IsBagPos(pos)))
+            (pItem2->GetProto()->Bonding == BIND_WHEN_EQUIPPED && IsBagPos(pos)))
             pItem2->SetBinding( true );
 
         pItem2->SetCount( pItem2->GetCount() + count );
@@ -11255,7 +11238,7 @@ void Player::VisualizeItem( uint8 slot, Item *pItem)
         return;
 
     // check also  BIND_WHEN_PICKED_UP and BIND_QUEST_ITEM for .additem or .additemset case by GM (not binded at adding to inventory)
-    if( pItem->GetProto()->Bonding == BIND_WHEN_EQUIPED || pItem->GetProto()->Bonding == BIND_WHEN_PICKED_UP || pItem->GetProto()->Bonding == BIND_QUEST_ITEM )
+    if( pItem->GetProto()->Bonding == BIND_WHEN_EQUIPPED || pItem->GetProto()->Bonding == BIND_WHEN_PICKED_UP || pItem->GetProto()->Bonding == BIND_QUEST_ITEM )
         pItem->SetBinding( true );
 
     DEBUG_LOG( "STORAGE: EquipItem slot = %u, item = %u", slot, pItem->GetEntry());
@@ -11411,7 +11394,7 @@ void Player::DestroyItem( uint8 bag, uint8 slot, bool update )
                 DestroyItem(slot, i, update);
         }
 
-        if(pItem->HasFlag(ITEM_FIELD_FLAGS, ITEM_FLAGS_WRAPPED))
+        if (pItem->HasFlag(ITEM_FIELD_FLAGS, ITEM_DYNFLAG_WRAPPED))
             CharacterDatabase.PExecute("DELETE FROM character_gifts WHERE item_guid = '%u'", pItem->GetGUIDLow());
 
         RemoveEnchantmentDurations(pItem);
@@ -11696,13 +11679,13 @@ void Player::SplitItem( uint16 src, uint16 dst, uint32 count )
     uint8 dstslot = dst & 255;
 
     Item *pSrcItem = GetItemByPos( srcbag, srcslot );
-    if( !pSrcItem )
+    if (!pSrcItem)
     {
         SendEquipError( EQUIP_ERR_ITEM_NOT_FOUND, pSrcItem, NULL );
         return;
     }
 
-    if(pSrcItem->m_lootGenerated)                           // prevent split looting item (item
+    if (pSrcItem->HasGeneratedLoot())                       // prevent split looting item (stackable items can has only temporary loot and this meaning that loot window open)
     {
         //best error message found for attempting to split while looting
         SendEquipError( EQUIP_ERR_COULDNT_SPLIT_ITEMS, pSrcItem, NULL );
@@ -11710,14 +11693,14 @@ void Player::SplitItem( uint16 src, uint16 dst, uint32 count )
     }
 
     // not let split all items (can be only at cheating)
-    if(pSrcItem->GetCount() == count)
+    if (pSrcItem->GetCount() == count)
     {
         SendEquipError( EQUIP_ERR_COULDNT_SPLIT_ITEMS, pSrcItem, NULL );
         return;
     }
 
     // not let split more existing items (can be only at cheating)
-    if(pSrcItem->GetCount() < count)
+    if (pSrcItem->GetCount() < count)
     {
         SendEquipError( EQUIP_ERR_TRIED_TO_SPLIT_MORE_THAN_COUNT, pSrcItem, NULL );
         return;
@@ -11725,20 +11708,20 @@ void Player::SplitItem( uint16 src, uint16 dst, uint32 count )
 
     DEBUG_LOG( "STORAGE: SplitItem bag = %u, slot = %u, item = %u, count = %u", dstbag, dstslot, pSrcItem->GetEntry(), count);
     Item *pNewItem = pSrcItem->CloneItem( count, this );
-    if( !pNewItem )
+    if (!pNewItem)
     {
         SendEquipError( EQUIP_ERR_ITEM_NOT_FOUND, pSrcItem, NULL );
         return;
     }
 
-    if( IsInventoryPos( dst ) )
+    if (IsInventoryPos(dst))
     {
         // change item amount before check (for unique max count check)
         pSrcItem->SetCount( pSrcItem->GetCount() - count );
 
         ItemPosCountVec dest;
         uint8 msg = CanStoreItem( dstbag, dstslot, dest, pNewItem, false );
-        if( msg != EQUIP_ERR_OK )
+        if (msg != EQUIP_ERR_OK)
         {
             delete pNewItem;
             pSrcItem->SetCount( pSrcItem->GetCount() + count );
@@ -11746,12 +11729,12 @@ void Player::SplitItem( uint16 src, uint16 dst, uint32 count )
             return;
         }
 
-        if( IsInWorld() )
+        if (IsInWorld())
             pSrcItem->SendCreateUpdateToPlayer( this );
         pSrcItem->SetState(ITEM_CHANGED, this);
         StoreItem( dest, pNewItem, true);
     }
-    else if( IsBankPos ( dst ) )
+    else if (IsBankPos (dst))
     {
         // change item amount before check (for unique max count check)
         pSrcItem->SetCount( pSrcItem->GetCount() - count );
@@ -11766,19 +11749,19 @@ void Player::SplitItem( uint16 src, uint16 dst, uint32 count )
             return;
         }
 
-        if( IsInWorld() )
+        if (IsInWorld())
             pSrcItem->SendCreateUpdateToPlayer( this );
         pSrcItem->SetState(ITEM_CHANGED, this);
         BankItem( dest, pNewItem, true);
     }
-    else if( IsEquipmentPos ( dst ) )
+    else if (IsEquipmentPos (dst))
     {
         // change item amount before check (for unique max count check), provide space for splitted items
         pSrcItem->SetCount( pSrcItem->GetCount() - count );
 
         uint16 dest;
         uint8 msg = CanEquipItem( dstslot, dest, pNewItem, false );
-        if( msg != EQUIP_ERR_OK )
+        if (msg != EQUIP_ERR_OK)
         {
             delete pNewItem;
             pSrcItem->SetCount( pSrcItem->GetCount() + count );
@@ -11786,7 +11769,7 @@ void Player::SplitItem( uint16 src, uint16 dst, uint32 count )
             return;
         }
 
-        if( IsInWorld() )
+        if (IsInWorld())
             pSrcItem->SendCreateUpdateToPlayer( this );
         pSrcItem->SetState(ITEM_CHANGED, this);
         EquipItem( dest, pNewItem, true);
@@ -12285,7 +12268,7 @@ void Player::UpdateEnchantTime(uint32 time)
 {
     for(EnchantDurationList::iterator itr = m_enchantDuration.begin(),next;itr != m_enchantDuration.end();itr=next)
     {
-        ASSERT(itr->item);
+        MANGOS_ASSERT(itr->item);
         next = itr;
         if (!itr->item->GetEnchantmentId(itr->slot))
         {
@@ -12840,7 +12823,7 @@ void Player::PrepareGossipMenu(WorldObject *pSource, uint32 menuId)
                         canTalkToCredit = false;
                     break;
                 case GOSSIP_OPTION_QUESTGIVER:
-                    PrepareQuestMenu(pSource->GetGUID());
+                    PrepareQuestMenu(pSource->GetObjectGuid());
                     hasMenuItem = false;
                     break;
                 case GOSSIP_OPTION_ARMORER:
@@ -12861,11 +12844,11 @@ void Player::PrepareGossipMenu(WorldObject *pSource, uint32 menuId)
                     break;
                 }
                 case GOSSIP_OPTION_TRAINER:
-                    if (!pCreature->isCanTrainingOf(this, false))
+                    if (!pCreature->IsTrainerOf(this, false))
                         hasMenuItem = false;
                     break;
                 case GOSSIP_OPTION_UNLEARNTALENTS:
-                    if (!pCreature->isCanTrainingAndResetTalentsOf(this))
+                    if (!pCreature->CanTrainAndResetTalentsOf(this))
                         hasMenuItem = false;
                     break;
                 case GOSSIP_OPTION_UNLEARNPETSKILLS:
@@ -12877,7 +12860,7 @@ void Player::PrepareGossipMenu(WorldObject *pSource, uint32 menuId)
                         return;
                     break;
                 case GOSSIP_OPTION_BATTLEFIELD:
-                    if (!pCreature->isCanInteractWithBattleMaster(this, false))
+                    if (!pCreature->CanInteractWithBattleMaster(this, false))
                         hasMenuItem = false;
                     break;
                 case GOSSIP_OPTION_STABLEPET:
@@ -12905,7 +12888,7 @@ void Player::PrepareGossipMenu(WorldObject *pSource, uint32 menuId)
             {
                 case GOSSIP_OPTION_QUESTGIVER:
                     if (pGo->GetGoType() == GAMEOBJECT_TYPE_QUESTGIVER)
-                        PrepareQuestMenu(pSource->GetGUID());
+                        PrepareQuestMenu(pSource->GetObjectGuid());
                     hasMenuItem = false;
                     break;
                 case GOSSIP_OPTION_GOSSIP:
@@ -12956,13 +12939,13 @@ void Player::PrepareGossipMenu(WorldObject *pSource, uint32 menuId)
         if (pCreature->HasFlag(UNIT_NPC_FLAGS,UNIT_NPC_FLAG_TRAINER))
         {
             // output error message if need
-            pCreature->isCanTrainingOf(this, true);
+            pCreature->IsTrainerOf(this, true);
         }
 
         if (pCreature->HasFlag(UNIT_NPC_FLAGS,UNIT_NPC_FLAG_BATTLEMASTER))
         {
             // output error message if need
-            pCreature->isCanInteractWithBattleMaster(this, true);
+            pCreature->CanInteractWithBattleMaster(this, true);
         }
     }*/
 }
@@ -12977,7 +12960,7 @@ void Player::SendPreparedGossip(WorldObject *pSource)
         // in case no gossip flag and quest menu not empty, open quest menu (client expect gossip menu with this flag)
         if (!((Creature*)pSource)->HasFlag(UNIT_NPC_FLAGS,UNIT_NPC_FLAG_GOSSIP) && !PlayerTalkClass->GetQuestMenu().Empty())
         {
-            SendPreparedQuest(pSource->GetGUID());
+            SendPreparedQuest(pSource->GetObjectGuid());
             return;
         }
     }
@@ -12986,7 +12969,7 @@ void Player::SendPreparedGossip(WorldObject *pSource)
         // probably need to find a better way here
         if (!PlayerTalkClass->GetGossipMenu().GetMenuId() && !PlayerTalkClass->GetQuestMenu().Empty())
         {
-            SendPreparedQuest(pSource->GetGUID());
+            SendPreparedQuest(pSource->GetObjectGuid());
             return;
         }
     }
@@ -13016,7 +12999,7 @@ void Player::OnGossipSelect(WorldObject* pSource, uint32 gossipListId, uint32 me
     GossipMenuItem const&  menu_item = gossipmenu.GetItem(gossipListId);
 
     uint32 gossipOptionId = menu_item.m_gOptionId;
-    uint64 guid = pSource->GetGUID();
+    ObjectGuid guid = pSource->GetObjectGuid();
     uint32 moneyTake = menu_item.m_gBoxMoney;
 
     // if this function called and player have money for pay MoneyTake or cheating, proccess both cases
@@ -13172,31 +13155,28 @@ uint32 Player::GetDefaultGossipMenuForSource(WorldObject *pSource)
 /***                    QUEST SYSTEM                   ***/
 /*********************************************************/
 
-void Player::PrepareQuestMenu( uint64 guid )
+void Player::PrepareQuestMenu(ObjectGuid guid)
 {
-    Object *pObject;
-    QuestRelations* pObjectQR;
-    QuestRelations* pObjectQIR;
+    QuestRelationsMapBounds rbounds;
+    QuestRelationsMapBounds irbounds;
 
     // pets also can have quests
     if (Creature *pCreature = GetMap()->GetAnyTypeCreature(guid))
     {
-        pObject = (Object*)pCreature;
-        pObjectQR  = &sObjectMgr.mCreatureQuestRelations;
-        pObjectQIR = &sObjectMgr.mCreatureQuestInvolvedRelations;
+        rbounds = sObjectMgr.GetCreatureQuestRelationsMapBounds(pCreature->GetEntry());
+        irbounds = sObjectMgr.GetCreatureQuestInvolvedRelationsMapBounds(pCreature->GetEntry());
     }
     else
     {
         //we should obtain map pointer from GetMap() in 99% of cases. Special case
         //only for quests which cast teleport spells on player
         Map * _map = IsInWorld() ? GetMap() : sMapMgr.FindMap(GetMapId(), GetInstanceId());
-        ASSERT(_map);
-        GameObject *pGameObject = _map->GetGameObject(guid);
-        if( pGameObject )
+        MANGOS_ASSERT(_map);
+
+        if (GameObject *pGameObject = _map->GetGameObject(guid))
         {
-            pObject = (Object*)pGameObject;
-            pObjectQR  = &sObjectMgr.mGOQuestRelations;
-            pObjectQIR = &sObjectMgr.mGOQuestInvolvedRelations;
+            rbounds = sObjectMgr.GetGOQuestRelationsMapBounds(pGameObject->GetEntry());
+            irbounds = sObjectMgr.GetGOQuestInvolvedRelationsMapBounds(pGameObject->GetEntry());
         }
         else
             return;
@@ -13205,34 +13185,44 @@ void Player::PrepareQuestMenu( uint64 guid )
     QuestMenu &qm = PlayerTalkClass->GetQuestMenu();
     qm.ClearMenu();
 
-    for(QuestRelations::const_iterator i = pObjectQIR->lower_bound(pObject->GetEntry()); i != pObjectQIR->upper_bound(pObject->GetEntry()); ++i)
+    for(QuestRelationsMap::const_iterator itr = irbounds.first; itr != irbounds.second; ++itr)
     {
-        uint32 quest_id = i->second;
-        QuestStatus status = GetQuestStatus( quest_id );
-        if ( status == QUEST_STATUS_COMPLETE && !GetQuestRewardStatus( quest_id ) )
+        uint32 quest_id = itr->second;
+
+        Quest const* pQuest = sObjectMgr.GetQuestTemplate(quest_id);
+
+        if (!pQuest || !pQuest->IsActive())
+            continue;
+
+        QuestStatus status = GetQuestStatus(quest_id);
+
+        if (status == QUEST_STATUS_COMPLETE && !GetQuestRewardStatus(quest_id))
             qm.AddMenuItem(quest_id, 4);
-        else if ( status == QUEST_STATUS_INCOMPLETE )
+        else if (status == QUEST_STATUS_INCOMPLETE)
             qm.AddMenuItem(quest_id, 4);
-        else if (status == QUEST_STATUS_AVAILABLE )
+        else if (status == QUEST_STATUS_AVAILABLE)
             qm.AddMenuItem(quest_id, 2);
     }
 
-    for(QuestRelations::const_iterator i = pObjectQR->lower_bound(pObject->GetEntry()); i != pObjectQR->upper_bound(pObject->GetEntry()); ++i)
+    for(QuestRelationsMap::const_iterator itr = rbounds.first; itr != rbounds.second; ++itr)
     {
-        uint32 quest_id = i->second;
-        Quest const* pQuest = sObjectMgr.GetQuestTemplate(quest_id);
-        if(!pQuest) continue;
+        uint32 quest_id = itr->second;
 
-        QuestStatus status = GetQuestStatus( quest_id );
+        Quest const* pQuest = sObjectMgr.GetQuestTemplate(quest_id);
+
+        if (!pQuest || !pQuest->IsActive())
+            continue;
+
+        QuestStatus status = GetQuestStatus(quest_id);
 
         if (pQuest->IsAutoComplete() && CanTakeQuest(pQuest, false))
             qm.AddMenuItem(quest_id, 4);
-        else if ( status == QUEST_STATUS_NONE && CanTakeQuest( pQuest, false ) )
+        else if (status == QUEST_STATUS_NONE && CanTakeQuest(pQuest, false))
             qm.AddMenuItem(quest_id, 2);
     }
 }
 
-void Player::SendPreparedQuest(uint64 guid)
+void Player::SendPreparedQuest(ObjectGuid guid)
 {
     QuestMenu& questMenu = PlayerTalkClass->GetQuestMenu();
 
@@ -13340,37 +13330,31 @@ bool Player::IsCurrentQuest( uint32 quest_id ) const
     return itr->second.m_status == QUEST_STATUS_INCOMPLETE || itr->second.m_status == QUEST_STATUS_COMPLETE && !itr->second.m_rewarded;
 }
 
-Quest const * Player::GetNextQuest( uint64 guid, Quest const *pQuest )
+Quest const* Player::GetNextQuest(ObjectGuid guid, Quest const *pQuest)
 {
-    Object *pObject;
-    QuestRelations* pObjectQR;
-    QuestRelations* pObjectQIR;
+    QuestRelationsMapBounds rbounds;
 
     if (Creature *pCreature = GetMap()->GetAnyTypeCreature(guid))
     {
-        pObject = (Object*)pCreature;
-        pObjectQR  = &sObjectMgr.mCreatureQuestRelations;
-        pObjectQIR = &sObjectMgr.mCreatureQuestInvolvedRelations;
+        rbounds = sObjectMgr.GetCreatureQuestRelationsMapBounds(pCreature->GetEntry());
     }
     else
     {
         //we should obtain map pointer from GetMap() in 99% of cases. Special case
         //only for quests which cast teleport spells on player
         Map * _map = IsInWorld() ? GetMap() : sMapMgr.FindMap(GetMapId(), GetInstanceId());
-        ASSERT(_map);
-        GameObject *pGameObject = _map->GetGameObject(guid);
-        if( pGameObject )
+        MANGOS_ASSERT(_map);
+
+        if (GameObject *pGameObject = _map->GetGameObject(guid))
         {
-            pObject = (Object*)pGameObject;
-            pObjectQR  = &sObjectMgr.mGOQuestRelations;
-            pObjectQIR = &sObjectMgr.mGOQuestInvolvedRelations;
+            rbounds = sObjectMgr.GetGOQuestRelationsMapBounds(pGameObject->GetEntry());
         }
         else
             return NULL;
     }
 
     uint32 nextQuestID = pQuest->GetNextQuestInChain();
-    for(QuestRelations::const_iterator itr = pObjectQR->lower_bound(pObject->GetEntry()); itr != pObjectQR->upper_bound(pObject->GetEntry()); ++itr)
+    for(QuestRelationsMap::const_iterator itr = rbounds.first; itr != rbounds.second; ++itr)
     {
         if (itr->second == nextQuestID)
             return sObjectMgr.GetQuestTemplate(nextQuestID);
@@ -13379,12 +13363,14 @@ Quest const * Player::GetNextQuest( uint64 guid, Quest const *pQuest )
     return NULL;
 }
 
-bool Player::CanSeeStartQuest( Quest const *pQuest ) const
+bool Player::CanSeeStartQuest(Quest const *pQuest) const
 {
-    if (SatisfyQuestRace( pQuest, false ) && SatisfyQuestSkillOrClass( pQuest, false ) &&
-        SatisfyQuestExclusiveGroup( pQuest, false ) && SatisfyQuestReputation( pQuest, false ) &&
-        SatisfyQuestPreviousQuest( pQuest, false ) && SatisfyQuestNextChain( pQuest, false ) &&
-        SatisfyQuestPrevChain( pQuest, false ) && SatisfyQuestDay( pQuest, false ) && SatisfyQuestWeek( pQuest, false ))
+    if (SatisfyQuestClass(pQuest, false) && SatisfyQuestRace(pQuest, false) && SatisfyQuestSkill(pQuest, false) &&
+        SatisfyQuestExclusiveGroup(pQuest, false) && SatisfyQuestReputation(pQuest, false) &&
+        SatisfyQuestPreviousQuest(pQuest, false) && SatisfyQuestNextChain(pQuest, false) &&
+        SatisfyQuestPrevChain(pQuest, false) && SatisfyQuestDay(pQuest, false) && SatisfyQuestWeek(pQuest, false) &&
+        SatisfyQuestMonth(pQuest, false) &&
+        pQuest->IsActive())
     {
         return getLevel() + sWorld.getConfig(CONFIG_UINT32_QUEST_HIGH_LEVEL_HIDE_DIFF) >= pQuest->GetMinLevel();
     }
@@ -13392,19 +13378,20 @@ bool Player::CanSeeStartQuest( Quest const *pQuest ) const
     return false;
 }
 
-bool Player::CanTakeQuest( Quest const *pQuest, bool msg ) const
+bool Player::CanTakeQuest(Quest const *pQuest, bool msg) const
 {
-    return SatisfyQuestStatus( pQuest, msg ) && SatisfyQuestExclusiveGroup( pQuest, msg )
-        && SatisfyQuestRace( pQuest, msg ) && SatisfyQuestLevel( pQuest, msg )
-        && SatisfyQuestSkillOrClass( pQuest, msg ) && SatisfyQuestReputation( pQuest, msg )
-        && SatisfyQuestPreviousQuest( pQuest, msg ) && SatisfyQuestTimed( pQuest, msg )
-        && SatisfyQuestNextChain( pQuest, msg ) && SatisfyQuestPrevChain( pQuest, msg )
-        && SatisfyQuestDay( pQuest, msg ) && SatisfyQuestWeek( pQuest, msg );
+    return SatisfyQuestStatus(pQuest, msg) && SatisfyQuestExclusiveGroup(pQuest, msg) &&
+        SatisfyQuestClass(pQuest, msg) && SatisfyQuestRace(pQuest, msg) && SatisfyQuestLevel(pQuest, msg) &&
+        SatisfyQuestSkill(pQuest, msg) && SatisfyQuestReputation(pQuest, msg) &&
+        SatisfyQuestPreviousQuest(pQuest, msg) && SatisfyQuestTimed(pQuest, msg) &&
+        SatisfyQuestNextChain(pQuest, msg) && SatisfyQuestPrevChain(pQuest, msg) &&
+        SatisfyQuestDay(pQuest, msg) && SatisfyQuestWeek(pQuest, msg) && SatisfyQuestMonth(pQuest, msg) &&
+        pQuest->IsActive();
 }
 
-bool Player::CanAddQuest( Quest const *pQuest, bool msg ) const
+bool Player::CanAddQuest(Quest const *pQuest, bool msg) const
 {
-    if (!SatisfyQuestLog( msg ))
+    if (!SatisfyQuestLog(msg))
         return false;
 
     if (!CanGiveQuestSourceItem(pQuest))
@@ -13413,7 +13400,7 @@ bool Player::CanAddQuest( Quest const *pQuest, bool msg ) const
     return true;
 }
 
-bool Player::CanCompleteQuest( uint32 quest_id ) const
+bool Player::CanCompleteQuest(uint32 quest_id) const
 {
     if (!quest_id)
         return false;
@@ -13424,12 +13411,23 @@ bool Player::CanCompleteQuest( uint32 quest_id ) const
     QuestStatus status = q_itr != mQuestStatus.end() ? q_itr->second.m_status : QUEST_STATUS_NONE;
 
     if (status == QUEST_STATUS_COMPLETE)
-        return false;                                   // not allow re-complete quest
+        return false;                                       // not allow re-complete quest
 
     Quest const* qInfo = sObjectMgr.GetQuestTemplate(quest_id);
 
     if (!qInfo)
         return false;
+
+    // only used for "flag" quests and not real in-game quests
+    if (qInfo->HasQuestFlag(QUEST_FLAGS_AUTO_REWARDED))
+    {
+        // a few checks, not all "satisfy" is needed
+        if (SatisfyQuestPreviousQuest(qInfo, false) && SatisfyQuestLevel(qInfo, false) &&
+            SatisfyQuestSkill(qInfo, false) && SatisfyQuestRace(qInfo, false) && SatisfyQuestClass(qInfo, false))
+            return true;
+
+        return false;
+    }
 
     // auto complete quest
     if (qInfo->IsAutoComplete() && CanTakeQuest(qInfo, false))
@@ -13441,7 +13439,7 @@ bool Player::CanCompleteQuest( uint32 quest_id ) const
     // incomplete quest have status data
     QuestStatusData const& q_status = q_itr->second;
 
-    if (qInfo->HasFlag( QUEST_MANGOS_FLAGS_DELIVER ))
+    if (qInfo->HasSpecialFlag(QUEST_SPECIAL_FLAG_DELIVER))
     {
         for(int i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i)
         {
@@ -13450,7 +13448,7 @@ bool Player::CanCompleteQuest( uint32 quest_id ) const
         }
     }
 
-    if (qInfo->HasFlag(QUEST_MANGOS_FLAGS_KILL_OR_CAST | QUEST_MANGOS_FLAGS_SPEAKTO))
+    if (qInfo->HasSpecialFlag(QuestSpecialFlags(QUEST_SPECIAL_FLAG_KILL_OR_CAST | QUEST_SPECIAL_FLAG_SPEAKTO)))
     {
         for(int i = 0; i < QUEST_OBJECTIVES_COUNT; ++i)
         {
@@ -13462,10 +13460,10 @@ bool Player::CanCompleteQuest( uint32 quest_id ) const
         }
     }
 
-    if (qInfo->HasFlag( QUEST_MANGOS_FLAGS_EXPLORATION_OR_EVENT ) && !q_status.m_explored)
+    if (qInfo->HasSpecialFlag(QUEST_SPECIAL_FLAG_EXPLORATION_OR_EVENT) && !q_status.m_explored)
         return false;
 
-    if (qInfo->HasFlag( QUEST_MANGOS_FLAGS_TIMED ) && q_status.m_timer == 0)
+    if (qInfo->HasSpecialFlag(QUEST_SPECIAL_FLAG_TIMED) && q_status.m_timer == 0)
         return false;
 
     if (qInfo->GetRewOrReqMoney() < 0)
@@ -13481,7 +13479,7 @@ bool Player::CanCompleteQuest( uint32 quest_id ) const
     return true;
 }
 
-bool Player::CanCompleteRepeatableQuest( Quest const *pQuest ) const
+bool Player::CanCompleteRepeatableQuest(Quest const *pQuest) const
 {
     // Solve problem that player don't have the quest and try complete it.
     // if repeatable she must be able to complete event if player don't have it.
@@ -13489,7 +13487,7 @@ bool Player::CanCompleteRepeatableQuest( Quest const *pQuest ) const
     if (!CanTakeQuest(pQuest, false))
         return false;
 
-    if (pQuest->HasFlag( QUEST_MANGOS_FLAGS_DELIVER) )
+    if (pQuest->HasSpecialFlag(QUEST_SPECIAL_FLAG_DELIVER))
         for(int i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i)
             if (pQuest->ReqItemId[i] && pQuest->ReqItemCount[i] && !HasItemCount(pQuest->ReqItemId[i], pQuest->ReqItemCount[i]))
                 return false;
@@ -13500,14 +13498,14 @@ bool Player::CanCompleteRepeatableQuest( Quest const *pQuest ) const
     return true;
 }
 
-bool Player::CanRewardQuest( Quest const *pQuest, bool msg ) const
+bool Player::CanRewardQuest(Quest const *pQuest, bool msg) const
 {
     // not auto complete quest and not completed quest (only cheating case, then ignore without message)
     if (!pQuest->IsAutoComplete() && GetQuestStatus(pQuest->GetQuestId()) != QUEST_STATUS_COMPLETE)
         return false;
 
     // daily quest can't be rewarded (25 daily quest already completed)
-    if (!SatisfyQuestDay(pQuest,true) || !SatisfyQuestWeek(pQuest,true))
+    if (!SatisfyQuestDay(pQuest, true) || !SatisfyQuestWeek(pQuest, true) || !SatisfyQuestMonth(pQuest, true))
         return false;
 
     // rewarded and not repeatable quest (only cheating case, then ignore without message)
@@ -13515,7 +13513,7 @@ bool Player::CanRewardQuest( Quest const *pQuest, bool msg ) const
         return false;
 
     // prevent receive reward with quest items in bank
-    if (pQuest->HasFlag( QUEST_MANGOS_FLAGS_DELIVER ))
+    if (pQuest->HasSpecialFlag(QUEST_SPECIAL_FLAG_DELIVER))
     {
         for(int i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i)
         {
@@ -13523,7 +13521,8 @@ bool Player::CanRewardQuest( Quest const *pQuest, bool msg ) const
                 GetItemCount(pQuest->ReqItemId[i]) < pQuest->ReqItemCount[i])
             {
                 if (msg)
-                    SendEquipError( EQUIP_ERR_ITEM_NOT_FOUND, NULL, NULL, pQuest->ReqItemId[i]);
+                    SendEquipError(EQUIP_ERR_ITEM_NOT_FOUND, NULL, NULL, pQuest->ReqItemId[i]);
+
                 return false;
             }
         }
@@ -13536,7 +13535,7 @@ bool Player::CanRewardQuest( Quest const *pQuest, bool msg ) const
     return true;
 }
 
-bool Player::CanRewardQuest( Quest const *pQuest, uint32 reward, bool msg ) const
+bool Player::CanRewardQuest(Quest const *pQuest, uint32 reward, bool msg) const
 {
     // prevent receive reward with quest items in bank or for not completed quest
     if (!CanRewardQuest(pQuest,msg))
@@ -13550,7 +13549,7 @@ bool Player::CanRewardQuest( Quest const *pQuest, uint32 reward, bool msg ) cons
             uint8 res = CanStoreNewItem( NULL_BAG, NULL_SLOT, dest, pQuest->RewChoiceItemId[reward], pQuest->RewChoiceItemCount[reward] );
             if (res != EQUIP_ERR_OK)
             {
-                SendEquipError( res, NULL, NULL, pQuest->RewChoiceItemId[reward] );
+                SendEquipError(res, NULL, NULL, pQuest->RewChoiceItemId[reward]);
                 return false;
             }
         }
@@ -13566,7 +13565,7 @@ bool Player::CanRewardQuest( Quest const *pQuest, uint32 reward, bool msg ) cons
                 uint8 res = CanStoreNewItem( NULL_BAG, NULL_SLOT, dest, pQuest->RewItemId[i], pQuest->RewItemCount[i] );
                 if (res != EQUIP_ERR_OK)
                 {
-                    SendEquipError( res, NULL, NULL );
+                    SendEquipError(res, NULL, NULL);
                     return false;
                 }
             }
@@ -13586,7 +13585,7 @@ void Player::SendPetTameFailure(PetTameFailureReason reason)
 void Player::AddQuest( Quest const *pQuest, Object *questGiver )
 {
     uint16 log_slot = FindQuestSlot( 0 );
-    ASSERT(log_slot < MAX_QUEST_LOG_SIZE);
+    MANGOS_ASSERT(log_slot < MAX_QUEST_LOG_SIZE);
 
     uint32 quest_id = pQuest->GetQuestId();
 
@@ -13597,13 +13596,13 @@ void Player::AddQuest( Quest const *pQuest, Object *questGiver )
     questStatusData.m_status = QUEST_STATUS_INCOMPLETE;
     questStatusData.m_explored = false;
 
-    if ( pQuest->HasFlag( QUEST_MANGOS_FLAGS_DELIVER ) )
+    if (pQuest->HasSpecialFlag(QUEST_SPECIAL_FLAG_DELIVER))
     {
         for(int i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i)
             questStatusData.m_itemcount[i] = 0;
     }
 
-    if ( pQuest->HasFlag(QUEST_MANGOS_FLAGS_KILL_OR_CAST | QUEST_MANGOS_FLAGS_SPEAKTO) )
+    if (pQuest->HasSpecialFlag(QuestSpecialFlags(QUEST_SPECIAL_FLAG_KILL_OR_CAST | QUEST_SPECIAL_FLAG_SPEAKTO)))
     {
         for(int i = 0; i < QUEST_OBJECTIVES_COUNT; ++i)
             questStatusData.m_creatureOrGOcount[i] = 0;
@@ -13618,7 +13617,7 @@ void Player::AddQuest( Quest const *pQuest, Object *questGiver )
             GetReputationMgr().SetVisible(factionEntry);
 
     uint32 qtime = 0;
-    if( pQuest->HasFlag( QUEST_MANGOS_FLAGS_TIMED ) )
+    if (pQuest->HasSpecialFlag(QUEST_SPECIAL_FLAG_TIMED))
     {
         uint32 limittime = pQuest->GetLimitTime();
 
@@ -13658,46 +13657,44 @@ void Player::AddQuest( Quest const *pQuest, Object *questGiver )
     UpdateForQuestWorldObjects();
 }
 
-void Player::CompleteQuest( uint32 quest_id )
+void Player::CompleteQuest(uint32 quest_id)
 {
-    if( quest_id )
+    if (quest_id)
     {
-        SetQuestStatus( quest_id, QUEST_STATUS_COMPLETE );
+        SetQuestStatus(quest_id, QUEST_STATUS_COMPLETE);
 
-        uint16 log_slot = FindQuestSlot( quest_id );
-        if( log_slot < MAX_QUEST_LOG_SIZE)
-            SetQuestSlotState(log_slot,QUEST_STATE_COMPLETE);
+        uint16 log_slot = FindQuestSlot(quest_id);
+        if (log_slot < MAX_QUEST_LOG_SIZE)
+            SetQuestSlotState(log_slot, QUEST_STATE_COMPLETE);
 
-        if(Quest const* qInfo = sObjectMgr.GetQuestTemplate(quest_id))
+        if (Quest const* qInfo = sObjectMgr.GetQuestTemplate(quest_id))
         {
-            if( qInfo->HasFlag(QUEST_FLAGS_AUTO_REWARDED) )
-                RewardQuest(qInfo,0,this,false);
-            else
-                SendQuestComplete( quest_id );
+            if (qInfo->HasQuestFlag(QUEST_FLAGS_AUTO_REWARDED))
+                RewardQuest(qInfo, 0, this, false);
         }
     }
 }
 
-void Player::IncompleteQuest( uint32 quest_id )
+void Player::IncompleteQuest(uint32 quest_id)
 {
-    if( quest_id )
+    if (quest_id)
     {
-        SetQuestStatus( quest_id, QUEST_STATUS_INCOMPLETE );
+        SetQuestStatus(quest_id, QUEST_STATUS_INCOMPLETE);
 
         uint16 log_slot = FindQuestSlot( quest_id );
-        if( log_slot < MAX_QUEST_LOG_SIZE)
-            RemoveQuestSlotState(log_slot,QUEST_STATE_COMPLETE);
+        if (log_slot < MAX_QUEST_LOG_SIZE)
+            RemoveQuestSlotState(log_slot, QUEST_STATE_COMPLETE);
     }
 }
 
-void Player::RewardQuest( Quest const *pQuest, uint32 reward, Object* questGiver, bool announce )
+void Player::RewardQuest(Quest const *pQuest, uint32 reward, Object* questGiver, bool announce)
 {
     uint32 quest_id = pQuest->GetQuestId();
 
     for (int i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i )
     {
         if (pQuest->ReqItemId[i])
-            DestroyItemCount( pQuest->ReqItemId[i], pQuest->ReqItemCount[i], true);
+            DestroyItemCount(pQuest->ReqItemId[i], pQuest->ReqItemCount[i], true);
     }
 
     RemoveTimedQuest(quest_id);
@@ -13711,7 +13708,7 @@ void Player::RewardQuest( Quest const *pQuest, uint32 reward, Object* questGiver
         if (uint32 itemId = pQuest->RewChoiceItemId[reward])
         {
             ItemPosCountVec dest;
-            if (CanStoreNewItem( NULL_BAG, NULL_SLOT, dest, itemId, pQuest->RewChoiceItemCount[reward] ) == EQUIP_ERR_OK)
+            if (CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, pQuest->RewChoiceItemCount[reward]) == EQUIP_ERR_OK)
             {
                 Item* item = StoreNewItem( dest, itemId, true, Item::GenerateItemRandomPropertyId(itemId));
                 SendNewItem(item, pQuest->RewChoiceItemCount[reward], true, false);
@@ -13726,7 +13723,7 @@ void Player::RewardQuest( Quest const *pQuest, uint32 reward, Object* questGiver
             if (uint32 itemId = pQuest->RewItemId[i])
             {
                 ItemPosCountVec dest;
-                if (CanStoreNewItem( NULL_BAG, NULL_SLOT, dest, itemId, pQuest->RewItemCount[i] ) == EQUIP_ERR_OK)
+                if (CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, pQuest->RewItemCount[i]) == EQUIP_ERR_OK)
                 {
                     Item* item = StoreNewItem( dest, itemId, true, Item::GenerateItemRandomPropertyId(itemId));
                     SendNewItem(item, pQuest->RewItemCount[i], true, false);
@@ -13735,19 +13732,19 @@ void Player::RewardQuest( Quest const *pQuest, uint32 reward, Object* questGiver
         }
     }
 
-    RewardReputation( pQuest );
+    RewardReputation(pQuest);
 
-    uint16 log_slot = FindQuestSlot( quest_id );
+    uint16 log_slot = FindQuestSlot(quest_id);
     if (log_slot < MAX_QUEST_LOG_SIZE)
         SetQuestSlot(log_slot,0);
 
     QuestStatusData& q_status = mQuestStatus[quest_id];
 
     // Not give XP in case already completed once repeatable quest
-    uint32 XP = q_status.m_rewarded ? 0 : uint32(pQuest->XPValue( this )*sWorld.getConfig(CONFIG_FLOAT_RATE_XP_QUEST));
+    uint32 XP = q_status.m_rewarded ? 0 : uint32(pQuest->XPValue(this)*sWorld.getConfig(CONFIG_FLOAT_RATE_XP_QUEST));
 
     if (getLevel() < sWorld.getConfig(CONFIG_UINT32_MAX_PLAYER_LEVEL))
-        GiveXP( XP , NULL );
+        GiveXP(XP , NULL);
     else
     {
         uint32 money = uint32(pQuest->GetRewMoneyMaxLevel() * sWorld.getConfig(CONFIG_FLOAT_RATE_DROP_MONEY));
@@ -13758,7 +13755,7 @@ void Player::RewardQuest( Quest const *pQuest, uint32 reward, Object* questGiver
     // Give player extra money if GetRewOrReqMoney > 0 and get ReqMoney if negative
     if (pQuest->GetRewOrReqMoney())
     {
-        ModifyMoney( pQuest->GetRewOrReqMoney() );
+        ModifyMoney(pQuest->GetRewOrReqMoney());
 
         if (pQuest->GetRewOrReqMoney() > 0)
             GetAchievementMgr().UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_MONEY_FROM_QUEST_REWARD, pQuest->GetRewOrReqMoney());
@@ -13777,7 +13774,7 @@ void Player::RewardQuest( Quest const *pQuest, uint32 reward, Object* questGiver
 
     if (pQuest->GetBonusTalents())
     {
-        m_questRewardTalentCount+=pQuest->GetBonusTalents();
+        m_questRewardTalentCount += pQuest->GetBonusTalents();
         InitTalentForLevel();
     }
 
@@ -13794,6 +13791,9 @@ void Player::RewardQuest( Quest const *pQuest, uint32 reward, Object* questGiver
     if (pQuest->IsWeekly())
         SetWeeklyQuestStatus(quest_id);
 
+    if (pQuest->IsMonthly())
+        SetMonthlyQuestStatus(quest_id);
+
     if (!pQuest->IsRepeatable())
         SetQuestStatus(quest_id, QUEST_STATUS_COMPLETE);
     else
@@ -13804,16 +13804,17 @@ void Player::RewardQuest( Quest const *pQuest, uint32 reward, Object* questGiver
         q_status.uState = QUEST_CHANGED;
 
     if (announce)
-        SendQuestReward( pQuest, XP, questGiver );
+        SendQuestReward(pQuest, XP, questGiver);
 
     // cast spells after mark quest complete (some spells have quest completed state reqyurements in spell_area data)
     if (pQuest->GetRewSpellCast() > 0)
-        CastSpell( this, pQuest->GetRewSpellCast(), true);
-    else if ( pQuest->GetRewSpell() > 0)
-        CastSpell( this, pQuest->GetRewSpell(), true);
+        CastSpell(this, pQuest->GetRewSpellCast(), true);
+    else if (pQuest->GetRewSpell() > 0)
+        CastSpell(this, pQuest->GetRewSpell(), true);
 
     if (pQuest->GetZoneOrSort() > 0)
         GetAchievementMgr().UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_COMPLETE_QUESTS_IN_ZONE, pQuest->GetZoneOrSort());
+
     GetAchievementMgr().UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_COMPLETE_QUEST_COUNT);
     GetAchievementMgr().UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_COMPLETE_QUEST, pQuest->GetQuestId());
 
@@ -13822,26 +13823,26 @@ void Player::RewardQuest( Quest const *pQuest, uint32 reward, Object* questGiver
 
     // remove auras from spells with quest reward state limitations
     SpellAreaForQuestMapBounds saEndBounds = sSpellMgr.GetSpellAreaForQuestEndMapBounds(quest_id);
-    if(saEndBounds.first != saEndBounds.second)
+    if (saEndBounds.first != saEndBounds.second)
     {
         GetZoneAndAreaId(zone,area);
 
         for(SpellAreaForAreaMap::const_iterator itr = saEndBounds.first; itr != saEndBounds.second; ++itr)
-            if(!itr->second->IsFitToRequirements(this,zone,area))
+            if (!itr->second->IsFitToRequirements(this, zone, area))
                 RemoveAurasDueToSpell(itr->second->spellId);
     }
 
     // Some spells applied at quest reward
-    SpellAreaForQuestMapBounds saBounds = sSpellMgr.GetSpellAreaForQuestMapBounds(quest_id,false);
-    if(saBounds.first != saBounds.second)
+    SpellAreaForQuestMapBounds saBounds = sSpellMgr.GetSpellAreaForQuestMapBounds(quest_id, false);
+    if (saBounds.first != saBounds.second)
     {
-        if(!zone || !area)
-            GetZoneAndAreaId(zone,area);
+        if (!zone || !area)
+            GetZoneAndAreaId(zone, area);
 
         for(SpellAreaForAreaMap::const_iterator itr = saBounds.first; itr != saBounds.second; ++itr)
-            if(itr->second->autocast && itr->second->IsFitToRequirements(this,zone,area))
+            if (itr->second->autocast && itr->second->IsFitToRequirements(this, zone, area))
                 if (!HasAura(itr->second->spellId, EFFECT_INDEX_0))
-                    CastSpell(this,itr->second->spellId,true);
+                    CastSpell(this, itr->second->spellId, true);
     }
 }
 
@@ -13859,7 +13860,7 @@ void Player::FailQuest(uint32 questId)
             SetQuestSlotState(log_slot, QUEST_STATE_FAIL);
         }
 
-        if (pQuest->HasFlag(QUEST_MANGOS_FLAGS_TIMED))
+        if (pQuest->HasSpecialFlag(QUEST_SPECIAL_FLAG_TIMED))
         {
             QuestStatusData& q_status = mQuestStatus[questId];
 
@@ -13873,64 +13874,40 @@ void Player::FailQuest(uint32 questId)
     }
 }
 
-bool Player::SatisfyQuestSkillOrClass( Quest const* qInfo, bool msg ) const
+bool Player::SatisfyQuestSkill(Quest const* qInfo, bool msg) const
 {
-    int32 zoneOrSort   = qInfo->GetZoneOrSort();
-    int32 skillOrClass = qInfo->GetSkillOrClass();
+    uint32 skill = qInfo->GetRequiredSkill();
 
-    // skip zone zoneOrSort and 0 case skillOrClass
-    if (zoneOrSort >= 0 && skillOrClass == 0)
+    // skip 0 case RequiredSkill
+    if (skill == 0)
         return true;
 
-    int32 questSort = -zoneOrSort;
-    uint8 reqSortClass = ClassByQuestSort(questSort);
-
-    // check class sort cases in zoneOrSort
-    if (reqSortClass != 0 && getClass() != reqSortClass)
+    // check skill value
+    if (GetSkillValue(skill) < qInfo->GetRequiredSkillValue())
     {
         if (msg)
-            SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
-        return false;
-    }
+            SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
 
-    // check class
-    if( skillOrClass < 0 )
-    {
-        uint8 reqClass = -int32(skillOrClass);
-        if(getClass() != reqClass)
-        {
-            if( msg )
-                SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
-            return false;
-        }
-    }
-    // check skill
-    else if( skillOrClass > 0 )
-    {
-        uint32 reqSkill = skillOrClass;
-        if( GetSkillValue( reqSkill ) < qInfo->GetRequiredSkillValue() )
-        {
-            if( msg )
-                SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
-            return false;
-        }
+        return false;
     }
 
     return true;
 }
 
-bool Player::SatisfyQuestLevel( Quest const* qInfo, bool msg ) const
+bool Player::SatisfyQuestLevel(Quest const* qInfo, bool msg) const
 {
     if (getLevel() < qInfo->GetMinLevel())
     {
         if (msg)
-            SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
+            SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
+
         return false;
     }
+
     return true;
 }
 
-bool Player::SatisfyQuestLog( bool msg ) const
+bool Player::SatisfyQuestLog(bool msg) const
 {
     // exist free slot
     if (FindQuestSlot(0) < MAX_QUEST_LOG_SIZE)
@@ -13938,24 +13915,24 @@ bool Player::SatisfyQuestLog( bool msg ) const
 
     if (msg)
     {
-        WorldPacket data( SMSG_QUESTLOG_FULL, 0 );
-        GetSession()->SendPacket( &data );
-        DEBUG_LOG( "WORLD: Sent SMSG_QUESTLOG_FULL" );
+        WorldPacket data(SMSG_QUESTLOG_FULL, 0);
+        GetSession()->SendPacket(&data);
+        DEBUG_LOG("WORLD: Sent SMSG_QUESTLOG_FULL");
     }
     return false;
 }
 
-bool Player::SatisfyQuestPreviousQuest( Quest const* qInfo, bool msg ) const
+bool Player::SatisfyQuestPreviousQuest(Quest const* qInfo, bool msg) const
 {
     // No previous quest (might be first quest in a series)
     if (qInfo->prevQuests.empty())
         return true;
 
-    for(Quest::PrevQuests::const_iterator iter = qInfo->prevQuests.begin(); iter != qInfo->prevQuests.end(); ++iter )
+    for(Quest::PrevQuests::const_iterator iter = qInfo->prevQuests.begin(); iter != qInfo->prevQuests.end(); ++iter)
     {
         uint32 prevId = abs(*iter);
 
-        QuestStatusMap::const_iterator i_prevstatus = mQuestStatus.find( prevId );
+        QuestStatusMap::const_iterator i_prevstatus = mQuestStatus.find(prevId);
         Quest const* qPrevInfo = sObjectMgr.GetQuestTemplate(prevId);
 
         if (qPrevInfo && i_prevstatus != mQuestStatus.end())
@@ -13969,12 +13946,11 @@ bool Player::SatisfyQuestPreviousQuest( Quest const* qInfo, bool msg ) const
 
                 // each-from-all exclusive group ( < 0)
                 // can be start if only all quests in prev quest exclusive group completed and rewarded
-                ObjectMgr::ExclusiveQuestGroups::const_iterator iter2 = sObjectMgr.mExclusiveQuestGroups.lower_bound(qPrevInfo->GetExclusiveGroup());
-                ObjectMgr::ExclusiveQuestGroups::const_iterator end  = sObjectMgr.mExclusiveQuestGroups.upper_bound(qPrevInfo->GetExclusiveGroup());
+                ExclusiveQuestGroupsMapBounds bounds = sObjectMgr.GetExclusiveQuestGroupsMapBounds(qPrevInfo->GetExclusiveGroup());
 
-                ASSERT(iter2!=end);                         // always must be found if qPrevInfo->ExclusiveGroup != 0
+                MANGOS_ASSERT(bounds.first != bounds.second); // always must be found if qPrevInfo->ExclusiveGroup != 0
 
-                for(; iter2 != end; ++iter2)
+                for(ExclusiveQuestGroupsMap::const_iterator iter2 = bounds.first; iter2 != bounds.second; ++iter2)
                 {
                     uint32 exclude_Id = iter2->second;
 
@@ -13982,13 +13958,14 @@ bool Player::SatisfyQuestPreviousQuest( Quest const* qInfo, bool msg ) const
                     if (exclude_Id == prevId)
                         continue;
 
-                    QuestStatusMap::const_iterator i_exstatus = mQuestStatus.find( exclude_Id );
+                    QuestStatusMap::const_iterator i_exstatus = mQuestStatus.find(exclude_Id);
 
                     // alternative quest from group also must be completed and rewarded(reported)
                     if (i_exstatus == mQuestStatus.end() || !i_exstatus->second.m_rewarded)
                     {
                         if (msg)
-                            SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
+                            SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
+
                         return false;
                     }
                 }
@@ -14003,12 +13980,11 @@ bool Player::SatisfyQuestPreviousQuest( Quest const* qInfo, bool msg ) const
 
                 // each-from-all exclusive group ( < 0)
                 // can be start if only all quests in prev quest exclusive group active
-                ObjectMgr::ExclusiveQuestGroups::const_iterator iter2 = sObjectMgr.mExclusiveQuestGroups.lower_bound(qPrevInfo->GetExclusiveGroup());
-                ObjectMgr::ExclusiveQuestGroups::const_iterator end  = sObjectMgr.mExclusiveQuestGroups.upper_bound(qPrevInfo->GetExclusiveGroup());
+                ExclusiveQuestGroupsMapBounds bounds = sObjectMgr.GetExclusiveQuestGroupsMapBounds(qPrevInfo->GetExclusiveGroup());
 
-                ASSERT(iter2!=end);                         // always must be found if qPrevInfo->ExclusiveGroup != 0
+                MANGOS_ASSERT(bounds.first != bounds.second); // always must be found if qPrevInfo->ExclusiveGroup != 0
 
-                for(; iter2 != end; ++iter2)
+                for(ExclusiveQuestGroupsMap::const_iterator iter2 = bounds.first; iter2 != bounds.second; ++iter2)
                 {
                     uint32 exclude_Id = iter2->second;
 
@@ -14020,7 +13996,8 @@ bool Player::SatisfyQuestPreviousQuest( Quest const* qInfo, bool msg ) const
                     if (!IsCurrentQuest(exclude_Id))
                     {
                         if (msg)
-                            SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
+                            SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
+
                         return false;
                     }
                 }
@@ -14032,32 +14009,55 @@ bool Player::SatisfyQuestPreviousQuest( Quest const* qInfo, bool msg ) const
     // Has only positive prev. quests in non-rewarded state
     // and negative prev. quests in non-active state
     if (msg)
-        SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
+        SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
 
     return false;
 }
 
-bool Player::SatisfyQuestRace( Quest const* qInfo, bool msg ) const
+bool Player::SatisfyQuestClass(Quest const* qInfo, bool msg) const
 {
-    uint32 reqraces = qInfo->GetRequiredRaces();
-    if (reqraces == 0)
+    uint32 reqClass = qInfo->GetRequiredClasses();
+
+    if (reqClass == 0)
         return true;
-    if ((reqraces & getRaceMask()) == 0)
+
+    if ((reqClass & getClassMask()) == 0)
     {
         if (msg)
-            SendCanTakeQuestResponse( INVALIDREASON_QUEST_FAILED_WRONG_RACE );
+            SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
+
         return false;
     }
+
     return true;
 }
 
-bool Player::SatisfyQuestReputation( Quest const* qInfo, bool msg ) const
+bool Player::SatisfyQuestRace(Quest const* qInfo, bool msg) const
+{
+    uint32 reqraces = qInfo->GetRequiredRaces();
+
+    if (reqraces == 0)
+        return true;
+
+    if ((reqraces & getRaceMask()) == 0)
+    {
+        if (msg)
+            SendCanTakeQuestResponse(INVALIDREASON_QUEST_FAILED_WRONG_RACE);
+
+        return false;
+    }
+
+    return true;
+}
+
+bool Player::SatisfyQuestReputation(Quest const* qInfo, bool msg) const
 {
     uint32 fIdMin = qInfo->GetRequiredMinRepFaction();      //Min required rep
     if (fIdMin && GetReputationMgr().GetReputation(fIdMin) < qInfo->GetRequiredMinRepValue())
     {
         if (msg)
-            SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
+            SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
+
         return false;
     }
 
@@ -14065,49 +14065,53 @@ bool Player::SatisfyQuestReputation( Quest const* qInfo, bool msg ) const
     if (fIdMax && GetReputationMgr().GetReputation(fIdMax) >= qInfo->GetRequiredMaxRepValue())
     {
         if (msg)
-            SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
+            SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
+
         return false;
     }
 
     return true;
 }
 
-bool Player::SatisfyQuestStatus( Quest const* qInfo, bool msg ) const
+bool Player::SatisfyQuestStatus(Quest const* qInfo, bool msg) const
 {
-    QuestStatusMap::const_iterator itr = mQuestStatus.find( qInfo->GetQuestId() );
+    QuestStatusMap::const_iterator itr = mQuestStatus.find(qInfo->GetQuestId());
+
     if (itr != mQuestStatus.end() && itr->second.m_status != QUEST_STATUS_NONE)
     {
         if (msg)
-            SendCanTakeQuestResponse( INVALIDREASON_QUEST_ALREADY_ON );
+            SendCanTakeQuestResponse(INVALIDREASON_QUEST_ALREADY_ON);
+
         return false;
     }
+
     return true;
 }
 
 bool Player::SatisfyQuestTimed(Quest const* qInfo, bool msg) const
 {
-    if (!m_timedquests.empty() && qInfo->HasFlag(QUEST_MANGOS_FLAGS_TIMED))
+    if (!m_timedquests.empty() && qInfo->HasSpecialFlag(QUEST_SPECIAL_FLAG_TIMED))
     {
         if (msg)
             SendCanTakeQuestResponse(INVALIDREASON_QUEST_ONLY_ONE_TIMED);
 
         return false;
     }
+
     return true;
 }
 
-bool Player::SatisfyQuestExclusiveGroup( Quest const* qInfo, bool msg ) const
+bool Player::SatisfyQuestExclusiveGroup(Quest const* qInfo, bool msg) const
 {
     // non positive exclusive group, if > 0 then can be start if any other quest in exclusive group already started/completed
     if (qInfo->GetExclusiveGroup() <= 0)
         return true;
 
-    ObjectMgr::ExclusiveQuestGroups::const_iterator iter = sObjectMgr.mExclusiveQuestGroups.lower_bound(qInfo->GetExclusiveGroup());
-    ObjectMgr::ExclusiveQuestGroups::const_iterator end  = sObjectMgr.mExclusiveQuestGroups.upper_bound(qInfo->GetExclusiveGroup());
+    ExclusiveQuestGroupsMapBounds bounds = sObjectMgr.GetExclusiveQuestGroupsMapBounds(qInfo->GetExclusiveGroup());
 
-    ASSERT(iter!=end);                                      // always must be found if qInfo->ExclusiveGroup != 0
+    MANGOS_ASSERT(bounds.first != bounds.second);           // must always be found if qInfo->ExclusiveGroup != 0
 
-    for(; iter != end; ++iter)
+    for(ExclusiveQuestGroupsMap::const_iterator iter = bounds.first; iter != bounds.second; ++iter)
     {
         uint32 exclude_Id = iter->second;
 
@@ -14119,37 +14123,41 @@ bool Player::SatisfyQuestExclusiveGroup( Quest const* qInfo, bool msg ) const
         Quest const* Nquest = sObjectMgr.GetQuestTemplate(exclude_Id);
         if (!SatisfyQuestDay(Nquest, false) || !SatisfyQuestWeek(Nquest, false))
         {
-            if( msg )
-                SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
+            if (msg)
+                SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
+
             return false;
         }
 
-        QuestStatusMap::const_iterator i_exstatus = mQuestStatus.find( exclude_Id );
+        QuestStatusMap::const_iterator i_exstatus = mQuestStatus.find(exclude_Id);
 
         // alternative quest already started or completed
-        if (i_exstatus != mQuestStatus.end()
-            && (i_exstatus->second.m_status == QUEST_STATUS_COMPLETE || i_exstatus->second.m_status == QUEST_STATUS_INCOMPLETE))
+        if (i_exstatus != mQuestStatus.end() &&
+            (i_exstatus->second.m_status == QUEST_STATUS_COMPLETE || i_exstatus->second.m_status == QUEST_STATUS_INCOMPLETE))
         {
             if (msg)
-                SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
+                SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
+
             return false;
         }
     }
+
     return true;
 }
 
-bool Player::SatisfyQuestNextChain( Quest const* qInfo, bool msg ) const
+bool Player::SatisfyQuestNextChain(Quest const* qInfo, bool msg) const
 {
     if (!qInfo->GetNextQuestInChain())
         return true;
 
     // next quest in chain already started or completed
-    QuestStatusMap::const_iterator itr = mQuestStatus.find( qInfo->GetNextQuestInChain() );
-    if (itr != mQuestStatus.end()
-        && (itr->second.m_status == QUEST_STATUS_COMPLETE || itr->second.m_status == QUEST_STATUS_INCOMPLETE))
+    QuestStatusMap::const_iterator itr = mQuestStatus.find(qInfo->GetNextQuestInChain());
+    if (itr != mQuestStatus.end() &&
+        (itr->second.m_status == QUEST_STATUS_COMPLETE || itr->second.m_status == QUEST_STATUS_INCOMPLETE))
     {
         if (msg)
-            SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
+            SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
+
         return false;
     }
 
@@ -14159,13 +14167,13 @@ bool Player::SatisfyQuestNextChain( Quest const* qInfo, bool msg ) const
     return true;
 }
 
-bool Player::SatisfyQuestPrevChain( Quest const* qInfo, bool msg ) const
+bool Player::SatisfyQuestPrevChain(Quest const* qInfo, bool msg) const
 {
     // No previous quest in chain
     if (qInfo->prevChainQuests.empty())
         return true;
 
-    for(Quest::PrevChainQuests::const_iterator iter = qInfo->prevChainQuests.begin(); iter != qInfo->prevChainQuests.end(); ++iter )
+    for(Quest::PrevChainQuests::const_iterator iter = qInfo->prevChainQuests.begin(); iter != qInfo->prevChainQuests.end(); ++iter)
     {
         uint32 prevId = *iter;
 
@@ -14173,7 +14181,8 @@ bool Player::SatisfyQuestPrevChain( Quest const* qInfo, bool msg ) const
         if (IsCurrentQuest(prevId))
         {
             if (msg)
-                SendCanTakeQuestResponse( INVALIDREASON_DONT_HAVE_REQ );
+                SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
+
             return false;
         }
 
@@ -14187,7 +14196,7 @@ bool Player::SatisfyQuestPrevChain( Quest const* qInfo, bool msg ) const
     return true;
 }
 
-bool Player::SatisfyQuestDay( Quest const* qInfo, bool msg ) const
+bool Player::SatisfyQuestDay(Quest const* qInfo, bool msg) const
 {
     if (!qInfo->IsDaily())
         return true;
@@ -14206,20 +14215,30 @@ bool Player::SatisfyQuestDay( Quest const* qInfo, bool msg ) const
     if (!have_slot)
     {
         if (msg)
-            SendCanTakeQuestResponse( INVALIDREASON_DAILY_QUESTS_REMAINING );
+            SendCanTakeQuestResponse(INVALIDREASON_DAILY_QUESTS_REMAINING);
+
         return false;
     }
 
     return true;
 }
 
-bool Player::SatisfyQuestWeek( Quest const* qInfo, bool msg ) const
+bool Player::SatisfyQuestWeek(Quest const* qInfo, bool msg) const
 {
     if (!qInfo->IsWeekly() || m_weeklyquests.empty())
         return true;
 
     // if not found in cooldown list
     return m_weeklyquests.find(qInfo->GetQuestId()) == m_weeklyquests.end();
+}
+
+bool Player::SatisfyQuestMonth(Quest const* qInfo, bool msg) const
+{
+    if (!qInfo->IsMonthly() || m_monthlyquests.empty())
+        return true;
+
+    // if not found in cooldown list
+    return m_monthlyquests.find(qInfo->GetQuestId()) == m_monthlyquests.end();
 }
 
 bool Player::CanGiveQuestSourceItem( Quest const *pQuest, ItemPosCountVec* dest ) const
@@ -14327,7 +14346,7 @@ QuestStatus Player::GetQuestStatus( uint32 quest_id ) const
 bool Player::CanShareQuest(uint32 quest_id) const
 {
     if (Quest const* qInfo = sObjectMgr.GetQuestTemplate(quest_id))
-        if (qInfo->HasFlag(QUEST_FLAGS_SHARABLE))
+        if (qInfo->HasQuestFlag(QUEST_FLAGS_SHARABLE))
             return IsCurrentQuest(quest_id);
 
     return false;
@@ -14364,7 +14383,7 @@ uint32 Player::GetReqKillOrCastCurrentCount(uint32 quest_id, int32 entry)
 
 void Player::AdjustQuestReqItemCount( Quest const* pQuest, QuestStatusData& questStatusData )
 {
-    if ( pQuest->HasFlag( QUEST_MANGOS_FLAGS_DELIVER ) )
+    if (pQuest->HasSpecialFlag(QUEST_SPECIAL_FLAG_DELIVER))
     {
         for(int i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i)
         {
@@ -14400,7 +14419,10 @@ void Player::AreaExploredOrEventHappens( uint32 questId )
 
             if(!q_status.m_explored)
             {
+                SetQuestSlotState(log_slot, QUEST_STATE_COMPLETE);
+                SendQuestCompleteEvent(questId);
                 q_status.m_explored = true;
+
                 if (q_status.uState != QUEST_NEW)
                     q_status.uState = QUEST_CHANGED;
             }
@@ -14442,7 +14464,7 @@ void Player::ItemAddedQuestCheck( uint32 entry, uint32 count )
             continue;
 
         Quest const* qInfo = sObjectMgr.GetQuestTemplate(questid);
-        if( !qInfo || !qInfo->HasFlag( QUEST_MANGOS_FLAGS_DELIVER ) )
+        if (!qInfo || !qInfo->HasSpecialFlag(QUEST_SPECIAL_FLAG_DELIVER))
             continue;
 
         for (int j = 0; j < QUEST_ITEM_OBJECTIVES_COUNT; ++j)
@@ -14479,7 +14501,7 @@ void Player::ItemRemovedQuestCheck( uint32 entry, uint32 count )
         Quest const* qInfo = sObjectMgr.GetQuestTemplate(questid);
         if ( !qInfo )
             continue;
-        if( !qInfo->HasFlag( QUEST_MANGOS_FLAGS_DELIVER ) )
+        if (!qInfo->HasSpecialFlag(QUEST_SPECIAL_FLAG_DELIVER))
             continue;
 
         for (int j = 0; j < QUEST_ITEM_OBJECTIVES_COUNT; ++j)
@@ -14537,7 +14559,7 @@ void Player::KilledMonsterCredit( uint32 entry, ObjectGuid guid )
         QuestStatusData& q_status = mQuestStatus[questid];
         if (q_status.m_status == QUEST_STATUS_INCOMPLETE && (!GetGroup() || !GetGroup()->isRaidGroup() || qInfo->IsAllowedInRaid()))
         {
-            if (qInfo->HasFlag( QUEST_MANGOS_FLAGS_KILL_OR_CAST))
+            if (qInfo->HasSpecialFlag(QUEST_SPECIAL_FLAG_KILL_OR_CAST))
             {
                 for (int j = 0; j < QUEST_OBJECTIVES_COUNT; ++j)
                 {
@@ -14591,10 +14613,10 @@ void Player::CastedCreatureOrGO( uint32 entry, ObjectGuid guid, uint32 spell_id,
         if (!qInfo)
             continue;
 
-        if (!original_caster && !qInfo->HasFlag(QUEST_FLAGS_SHARABLE))
+        if (!original_caster && !qInfo->HasQuestFlag(QUEST_FLAGS_SHARABLE))
             continue;
 
-        if (!qInfo->HasFlag(QUEST_MANGOS_FLAGS_KILL_OR_CAST))
+        if (!qInfo->HasSpecialFlag(QUEST_SPECIAL_FLAG_KILL_OR_CAST))
             continue;
 
         QuestStatusData& q_status = mQuestStatus[questid];
@@ -14666,7 +14688,7 @@ void Player::TalkedToCreature( uint32 entry, ObjectGuid guid )
 
         if ( q_status.m_status == QUEST_STATUS_INCOMPLETE )
         {
-            if( qInfo->HasFlag( QUEST_MANGOS_FLAGS_KILL_OR_CAST | QUEST_MANGOS_FLAGS_SPEAKTO ) )
+            if (qInfo->HasSpecialFlag(QuestSpecialFlags(QUEST_SPECIAL_FLAG_KILL_OR_CAST | QUEST_SPECIAL_FLAG_SPEAKTO)))
             {
                 for (int j = 0; j < QUEST_OBJECTIVES_COUNT; ++j)
                 {
@@ -14820,14 +14842,15 @@ bool Player::HasQuestForItem( uint32 itemid ) const
     return false;
 }
 
-void Player::SendQuestComplete( uint32 quest_id )
+// Used for quests having some event (explore, escort, "external event") as quest objective.
+void Player::SendQuestCompleteEvent(uint32 quest_id)
 {
-    if( quest_id )
+    if (quest_id)
     {
-        WorldPacket data( SMSG_QUESTUPDATE_COMPLETE, 4 );
+        WorldPacket data(SMSG_QUESTUPDATE_COMPLETE, 4);
         data << uint32(quest_id);
-        GetSession()->SendPacket( &data );
-        DEBUG_LOG( "WORLD: Sent SMSG_QUESTUPDATE_COMPLETE quest = %u", quest_id );
+        GetSession()->SendPacket(&data);
+        DEBUG_LOG("WORLD: Sent SMSG_QUESTUPDATE_COMPLETE quest = %u", quest_id);
     }
 }
 
@@ -14939,7 +14962,7 @@ void Player::SendQuestUpdateAddItem( Quest const* /*pQuest*/, uint32 /*item_idx*
 
 void Player::SendQuestUpdateAddCreatureOrGo( Quest const* pQuest, ObjectGuid guid, uint32 creatureOrGO_idx, uint32 old_count, uint32 add_count )
 {
-    ASSERT(old_count + add_count < 65536 && "mob/GO count store in 16 bits 2^16 = 65536 (0..65536)");
+    MANGOS_ASSERT(old_count + add_count < 65536 && "mob/GO count store in 16 bits 2^16 = 65536 (0..65536)");
 
     int32 entry = pQuest->ReqCreatureOrGOId[ creatureOrGO_idx ];
     if (entry < 0)
@@ -15467,17 +15490,16 @@ bool Player::LoadFromDB( uint32 guid, SqlQueryHolder *holder )
     std::string taxi_nodes = fields[37].GetCppString();
 
     // clear channel spell data (if saved at channel spell casting)
-    SetChannelObjectGUID(0);
+    SetChannelObjectGuid(ObjectGuid());
     SetUInt32Value(UNIT_CHANNEL_SPELL,0);
 
     // clear charm/summon related fields
     SetCharm(NULL);
     SetPet(NULL);
-    SetTargetGUID(0);
-    SetChannelObjectGUID(0);
-    SetCharmerGUID(0);
-    SetOwnerGUID(0);
-    SetCreatorGUID(0);
+    SetTargetGuid(ObjectGuid());
+    SetCharmerGuid(ObjectGuid());
+    SetOwnerGuid(ObjectGuid());
+    SetCreatorGuid(ObjectGuid());
 
     // reset some aura modifiers before aura apply
 
@@ -15545,6 +15567,7 @@ bool Player::LoadFromDB( uint32 guid, SqlQueryHolder *holder )
     _LoadQuestStatus(holder->GetResult(PLAYER_LOGIN_QUERY_LOADQUESTSTATUS));
     _LoadDailyQuestStatus(holder->GetResult(PLAYER_LOGIN_QUERY_LOADDAILYQUESTSTATUS));
     _LoadWeeklyQuestStatus(holder->GetResult(PLAYER_LOGIN_QUERY_LOADWEEKLYQUESTSTATUS));
+    _LoadMonthlyQuestStatus(holder->GetResult(PLAYER_LOGIN_QUERY_LOADMONTHLYQUESTSTATUS));
 
     _LoadTalents(holder->GetResult(PLAYER_LOGIN_QUERY_LOADTALENTS));
 
@@ -15556,6 +15579,7 @@ bool Player::LoadFromDB( uint32 guid, SqlQueryHolder *holder )
     m_reputationMgr.LoadFromDB(holder->GetResult(PLAYER_LOGIN_QUERY_LOADREPUTATION));
 
     _LoadInventory(holder->GetResult(PLAYER_LOGIN_QUERY_LOADINVENTORY), time_diff);
+    _LoadItemLoot(holder->GetResult(PLAYER_LOGIN_QUERY_LOADITEMLOOT));
 
     // update items with duration and realtime
     UpdateItemDuration(time_diff, true);
@@ -15610,7 +15634,7 @@ bool Player::LoadFromDB( uint32 guid, SqlQueryHolder *holder )
     {
         // save source node as recall coord to prevent recall and fall from sky
         TaxiNodesEntry const* nodeEntry = sTaxiNodesStore.LookupEntry(node_id);
-        ASSERT(nodeEntry);                                  // checked in m_taxi.LoadTaxiDestinationsFromString
+        MANGOS_ASSERT(nodeEntry);                           // checked in m_taxi.LoadTaxiDestinationsFromString
         m_recallMap = nodeEntry->map_id;
         m_recallX = nodeEntry->x;
         m_recallY = nodeEntry->y;
@@ -15719,7 +15743,11 @@ bool Player::LoadFromDB( uint32 guid, SqlQueryHolder *holder )
 
 bool Player::isAllowedToLoot(Creature* creature)
 {
-    if(Player* recipient = creature->GetLootRecipient())
+    // never tapped by any (mob solo kill)
+    if (!creature->HasFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_TAPPED))
+        return false;
+
+    if (Player* recipient = creature->GetLootRecipient())
     {
         if (recipient == this)
             return true;
@@ -15963,7 +15991,7 @@ void Player::_LoadInventory(QueryResult *result, uint32 timediff)
 
             Item *item = NewItemOrBag(proto);
 
-            if(!item->LoadFromDB(item_guid, GetGUID(), result))
+            if(!item->LoadFromDB(item_guid, GetGUID(), fields))
             {
                 sLog.outError( "Player::_LoadInventory: Player %s has broken item (id: #%u) in inventory, deleted.", GetName(),item_id );
                 CharacterDatabase.PExecute("DELETE FROM character_inventory WHERE item = '%u'", item_guid);
@@ -15982,7 +16010,7 @@ void Player::_LoadInventory(QueryResult *result, uint32 timediff)
             }
 
             // "Conjured items disappear if you are logged out for more than 15 minutes"
-            if (timediff > 15*MINUTE && item->HasFlag(ITEM_FIELD_FLAGS, ITEM_FLAGS_CONJURED))
+            if (timediff > 15*MINUTE && (item->GetProto()->Flags & ITEM_FLAG_CONJURED))
             {
                 CharacterDatabase.PExecute("DELETE FROM character_inventory WHERE item = '%u'", item_guid);
                 item->FSetState(ITEM_REMOVED);
@@ -16087,8 +16115,37 @@ void Player::_LoadInventory(QueryResult *result, uint32 timediff)
             draft.SendMailTo(this, MailSender(this, MAIL_STATIONERY_GM), MAIL_CHECK_MASK_COPIED);
         }
     }
+
     //if(isAlive())
     _ApplyAllItemMods();
+}
+
+void Player::_LoadItemLoot(QueryResult *result)
+{
+    //QueryResult *result = CharacterDatabase.PQuery("SELECT guid,itemid,amount,suffix,property FROM item_loot WHERE guid = '%u'", GetGUIDLow());
+
+    if (result)
+    {
+        do
+        {
+            Field *fields = result->Fetch();
+            uint32 item_guid   = fields[0].GetUInt32();
+
+            Item* item = GetItemByGuid(ObjectGuid(HIGHGUID_ITEM, item_guid));
+
+            if (!item)
+            {
+                CharacterDatabase.PExecute("DELETE FROM item_loot WHERE guid = '%u'", item_guid);
+                sLog.outError("Player::_LoadItemLoot: Player %s has loot for not existed item (GUID: %u) in `item_loot`, deleted.", GetName(), item_guid );
+                continue;
+            }
+
+            item->LoadLootFromDB(fields);
+
+        } while (result->NextRow());
+
+        delete result;
+    }
 }
 
 // load mailed item which should receive current player
@@ -16124,7 +16181,7 @@ void Player::_LoadMailedItems(QueryResult *result)
 
         Item *item = NewItemOrBag(proto);
 
-        if(!item->LoadFromDB(item_guid_low, 0, result))
+        if(!item->LoadFromDB(item_guid_low, 0, fields))
         {
             sLog.outError( "Player::_LoadMailedItems - Item in mail (%u) doesn't exist !!!! - item guid: %u, deleted from mail", mail->messageID, item_guid_low);
             CharacterDatabase.PExecute("DELETE FROM mail_items WHERE item_guid = '%u'", item_guid_low);
@@ -16228,7 +16285,7 @@ void Player::_LoadQuestStatus(QueryResult *result)
 
                 time_t quest_time = time_t(fields[4].GetUInt64());
 
-                if( pQuest->HasFlag( QUEST_MANGOS_FLAGS_TIMED ) && !GetQuestRewardStatus(quest_id) &&  questStatusData.m_status != QUEST_STATUS_NONE )
+                if (pQuest->HasSpecialFlag(QUEST_SPECIAL_FLAG_TIMED) && !GetQuestRewardStatus(quest_id) && questStatusData.m_status != QUEST_STATUS_NONE)
                 {
                     AddTimedQuest( quest_id );
 
@@ -16259,6 +16316,9 @@ void Player::_LoadQuestStatus(QueryResult *result)
                     (!questStatusData.m_rewarded || pQuest->IsRepeatable())))
                 {
                     SetQuestSlot(slot, quest_id, uint32(quest_time));
+
+                    if (questStatusData.m_explored)
+                        SetQuestSlotState(slot, QUEST_STATE_COMPLETE);
 
                     if (questStatusData.m_status == QUEST_STATUS_COMPLETE)
                         SetQuestSlotState(slot, QUEST_STATE_COMPLETE);
@@ -16369,6 +16429,36 @@ void Player::_LoadWeeklyQuestStatus(QueryResult *result)
         delete result;
     }
     m_WeeklyQuestChanged = false;
+}
+
+void Player::_LoadMonthlyQuestStatus(QueryResult *result)
+{
+    m_monthlyquests.clear();
+
+    //QueryResult *result = CharacterDatabase.PQuery("SELECT quest FROM character_queststatus_weekly WHERE guid = '%u'", GetGUIDLow());
+
+    if (result)
+    {
+        do
+        {
+            Field *fields = result->Fetch();
+
+            uint32 quest_id = fields[0].GetUInt32();
+
+            Quest const* pQuest = sObjectMgr.GetQuestTemplate(quest_id);
+            if (!pQuest)
+                continue;
+
+            m_monthlyquests.insert(quest_id);
+
+            DEBUG_LOG("Monthly quest {%u} cooldown for player (GUID: %u)", quest_id, GetGUIDLow());
+        }
+        while( result->NextRow() );
+
+        delete result;
+    }
+
+    m_MonthlyQuestChanged = false;
 }
 
 void Player::_LoadSpells(QueryResult *result)
@@ -16665,7 +16755,7 @@ void Player::SendRaidInfo()
                 InstanceSave *save = itr->second.save;
                 data << uint32(save->GetMapId());           // map id
                 data << uint32(save->GetDifficulty());      // difficulty
-                data << uint64(save->GetInstanceId());      // instance id
+                data << ObjectGuid(save->GetInstanceGuid());// instance guid
                 data << uint8(1);                           // expired = 0
                 data << uint8(0);                           // extended = 1
                 data << uint32(save->GetResetTime() - now); // reset time
@@ -16732,7 +16822,7 @@ void Player::ConvertInstancesToGroup(Player *player, Group *group, ObjectGuid pl
             group = player->GetGroup();
     }
 
-    ASSERT(!player_guid.IsEmpty());
+    MANGOS_ASSERT(!player_guid.IsEmpty());
 
     // copy all binds to the group, when changing leader it's assumed the character
     // will not have any solo binds
@@ -16994,6 +17084,7 @@ void Player::SaveToDB()
     _SaveQuestStatus();
     _SaveDailyQuestStatus();
     _SaveWeeklyQuestStatus();
+    _SaveMonthlyQuestStatus();
     _SaveSpells();
     _SaveSpellCooldowns();
     _SaveActions();
@@ -17076,9 +17167,9 @@ void Player::_SaveAuras()
     for(SpellAuraHolderMap::const_iterator itr = auraHolders.begin(); itr != auraHolders.end(); ++itr)
     {
         SpellAuraHolder *holder = itr->second;
-        //skip all holders from spells that are passive
+        //skip all holders from spells that are passive or channeled
         //do not save single target holders (unless they were cast by the player)
-        if (!holder->IsPassive() && (holder->GetCasterGUID() == GetGUID() || !holder->IsSingleTarget()))
+        if (!holder->IsPassive() && !IsChanneledSpell(holder->GetSpellProto()) && (holder->GetCasterGUID() == GetGUID() || !holder->IsSingleTarget()))
         {
             int32 damage[MAX_EFFECT_INDEX];
             int32 remaintime[MAX_EFFECT_INDEX];
@@ -17322,6 +17413,24 @@ void Player::_SaveWeeklyQuestStatus()
     m_WeeklyQuestChanged = false;
 }
 
+void Player::_SaveMonthlyQuestStatus()
+{
+    if (!m_MonthlyQuestChanged || m_monthlyquests.empty())
+        return;
+
+    // we don't need transactions here.
+    CharacterDatabase.PExecute("DELETE FROM character_queststatus_monthly WHERE guid = '%u'", GetGUIDLow());
+
+    for (QuestSet::const_iterator iter = m_monthlyquests.begin(); iter != m_monthlyquests.end(); ++iter)
+    {
+        uint32 quest_id = *iter;
+
+        CharacterDatabase.PExecute("INSERT INTO character_queststatus_monthly (guid, quest) VALUES ('%u', '%u')", GetGUIDLow(), quest_id);
+    }
+
+    m_MonthlyQuestChanged = false;
+}
+
 void Player::_SaveSkills()
 {
     // we don't need transactions here.
@@ -17537,11 +17646,11 @@ void Player::SetUInt32ValueInArray(Tokens& tokens,uint16 index, uint32 value)
     tokens[index] = buf;
 }
 
-void Player::Customize(uint64 guid, uint8 gender, uint8 skin, uint8 face, uint8 hairStyle, uint8 hairColor, uint8 facialHair)
+void Player::Customize(ObjectGuid guid, uint8 gender, uint8 skin, uint8 face, uint8 hairStyle, uint8 hairColor, uint8 facialHair)
 {
     //                                                     0
-    QueryResult* result = CharacterDatabase.PQuery("SELECT playerBytes2 FROM characters WHERE guid = '%u'", GUID_LOPART(guid));
-    if(!result)
+    QueryResult* result = CharacterDatabase.PQuery("SELECT playerBytes2 FROM characters WHERE guid = '%u'", guid.GetCounter());
+    if (!result)
         return;
 
     Field* fields = result->Fetch();
@@ -17550,7 +17659,7 @@ void Player::Customize(uint64 guid, uint8 gender, uint8 skin, uint8 face, uint8 
     player_bytes2 &= ~0xFF;
     player_bytes2 |= facialHair;
 
-    CharacterDatabase.PExecute("UPDATE characters SET gender = '%u', playerBytes = '%u', playerBytes2 = '%u' WHERE guid = '%u'", gender, skin | (face << 8) | (hairStyle << 16) | (hairColor << 24), player_bytes2, GUID_LOPART(guid));
+    CharacterDatabase.PExecute("UPDATE characters SET gender = '%u', playerBytes = '%u', playerBytes2 = '%u' WHERE guid = '%u'", gender, skin | (face << 8) | (hairStyle << 16) | (hairColor << 24), player_bytes2, guid.GetCounter());
 
     delete result;
 }
@@ -17737,7 +17846,7 @@ void Player::RemovePet(Pet* pet, PetSaveMode mode, bool returnreagent)
     if (!pet)
         pet = GetPet();
 
-    if (!pet || pet->GetOwnerGUID() != GetGUID())
+    if (!pet || pet->GetOwnerGuid() != GetObjectGuid())
         return;
 
     // not save secondary permanent pet as current
@@ -17747,7 +17856,7 @@ void Player::RemovePet(Pet* pet, PetSaveMode mode, bool returnreagent)
     if (returnreagent && pet && mode != PET_SAVE_AS_CURRENT)
     {
         //returning of reagents only for players, so best done here
-        uint32 spellId = pet ? pet->GetUInt32Value(UNIT_CREATED_BY_SPELL) : m_oldpetspell;
+        uint32 spellId = pet->GetUInt32Value(UNIT_CREATED_BY_SPELL);
         SpellEntry const *spellInfo = sSpellStore.LookupEntry(spellId);
 
         if(spellInfo)
@@ -17779,7 +17888,7 @@ void Player::RemovePet(Pet* pet, PetSaveMode mode, bool returnreagent)
             RemoveGuardian(pet);
             break;
         default:
-            if (GetPetGUID() == pet->GetGUID())
+            if (GetPetGuid() == pet->GetObjectGuid())
                 SetPet(NULL);
             break;
     }
@@ -17964,13 +18073,13 @@ void Player::PetSpellInitialize()
 
 void Player::SendPetGUIDs()
 {
-    if(!GetPetGUID())
+    if (GetPetGuid().IsEmpty())
         return;
 
     // Later this function might get modified for multiple guids
     WorldPacket data(SMSG_PET_GUIDS, 12);
     data << uint32(1);                      // count
-    data << uint64(GetPetGUID());
+    data << ObjectGuid(GetPetGuid());
     GetSession()->SendPacket(&data);
 }
 
@@ -18156,10 +18265,10 @@ void Player::RemoveSpellMods(Spell const* spell)
 }
 
 // send Proficiency
-void Player::SendProficiency(uint8 pr1, uint32 pr2)
+void Player::SendProficiency(ItemClass itemClass, uint32 itemSubclassMask)
 {
-    WorldPacket data(SMSG_SET_PROFICIENCY, 8);
-    data << uint8(pr1) << uint32(pr2);
+    WorldPacket data(SMSG_SET_PROFICIENCY, 1 + 4);
+    data << uint8(itemClass) << uint32(itemSubclassMask);
     GetSession()->SendPacket (&data);
 }
 
@@ -18258,8 +18367,8 @@ void Player::HandleStealthedUnitsDetection()
 {
     std::list<Unit*> stealthedUnits;
 
-    MaNGOS::AnyStealthedCheck u_check;
-    MaNGOS::UnitListSearcher<MaNGOS::AnyStealthedCheck > searcher(this,stealthedUnits, u_check);
+    MaNGOS::AnyStealthedCheck u_check(this);
+    MaNGOS::UnitListSearcher<MaNGOS::AnyStealthedCheck > searcher(stealthedUnits, u_check);
     Cell::VisitAllObjects(this, searcher, MAX_PLAYER_STEALTH_DETECT_RANGE);
 
     WorldObject const* viewPoint = GetCamera().GetBody();
@@ -18573,7 +18682,7 @@ void Player::ProhibitSpellSchool(SpellSchoolMask idSchoolMask, uint32 unTimeMs )
         SpellEntry const *spellInfo = sSpellStore.LookupEntry(unSpellId);
         if (!spellInfo)
         {
-            ASSERT(spellInfo);
+            MANGOS_ASSERT(spellInfo);
             continue;
         }
 
@@ -18767,7 +18876,7 @@ bool Player::BuyItemFromVendorSlot(uint64 vendorguid, uint32 vendorslot, uint32 
         }
     }
 
-    uint32 price  = (crItem->ExtendedCost == 0 || pProto->Flags2 & ITEM_FLAGS2_EXT_COST_REQUIRES_GOLD) ? pProto->BuyPrice * count : 0;
+    uint32 price  = (crItem->ExtendedCost == 0 || pProto->Flags2 & ITEM_FLAG2_EXT_COST_REQUIRES_GOLD) ? pProto->BuyPrice * count : 0;
 
     // reputation discount
     if (price)
@@ -19123,7 +19232,7 @@ void Player::UpdatePotionCooldown(Spell* spell)
     m_lastPotionId = 0;
 }
 
-                                                           //slot to be excluded while counting
+                                                            //slot to be excluded while counting
 bool Player::EnchantmentFitsRequirements(uint32 enchantmentcondition, int8 slot)
 {
     if(!enchantmentcondition)
@@ -19469,7 +19578,7 @@ inline void BeforeVisibilityDestroy(T* /*t*/, Player* /*p*/)
 template<>
 inline void BeforeVisibilityDestroy<Creature>(Creature* t, Player* p)
 {
-    if (p->GetPetGUID()==t->GetGUID() && ((Creature*)t)->isPet())
+    if (p->GetPetGuid() == t->GetObjectGuid() && ((Creature*)t)->IsPet())
         ((Pet*)t)->Remove(PET_SAVE_NOT_IN_SLOT, true);
 }
 
@@ -19479,12 +19588,18 @@ void Player::UpdateVisibilityOf(WorldObject const* viewPoint, WorldObject* targe
     {
         if(!target->isVisibleForInState(this, viewPoint, true))
         {
-            if (target->GetTypeId()==TYPEID_UNIT)
-                BeforeVisibilityDestroy<Creature>((Creature*)target,this);
-
             ObjectGuid t_guid = target->GetGUID();
 
-            target->DestroyForPlayer(this);
+            if (target->GetTypeId()==TYPEID_UNIT)
+            {
+                BeforeVisibilityDestroy<Creature>((Creature*)target,this);
+
+                // at remove from map (destroy) show kill animation (in different out of range/stealth case)
+                target->DestroyForPlayer(this, !target->IsInWorld() && ((Creature*)target)->isDead());
+            }
+            else
+                target->DestroyForPlayer(this);
+
             m_clientGUIDs.erase(t_guid);
 
             DEBUG_FILTER_LOG(LOG_FILTER_VISIBILITY_CHANGES, "%s out of range for player %u. Distance = %f",t_guid.GetString().c_str(),GetGUIDLow(),GetDistance(target));
@@ -19567,7 +19682,7 @@ void Player::InitPrimaryProfessions()
 
 void Player::SendComboPoints()
 {
-    Unit *combotarget = ObjectAccessor::GetUnit(*this, m_comboTarget);
+    Unit *combotarget = ObjectAccessor::GetUnit(*this, m_comboTargetGuid);
     if (combotarget)
     {
         WorldPacket data(SMSG_UPDATE_COMBO_POINTS, combotarget->GetPackGUID().size()+1);
@@ -19585,17 +19700,17 @@ void Player::AddComboPoints(Unit* target, int8 count)
     // without combo points lost (duration checked in aura)
     RemoveSpellsCausingAura(SPELL_AURA_RETAIN_COMBO_POINTS);
 
-    if(target->GetGUID() == m_comboTarget)
+    if(target->GetObjectGuid() == m_comboTargetGuid)
     {
         m_comboPoints += count;
     }
     else
     {
-        if(m_comboTarget)
-            if(Unit* target2 = ObjectAccessor::GetUnit(*this,m_comboTarget))
+        if (!m_comboTargetGuid.IsEmpty())
+            if(Unit* target2 = ObjectAccessor::GetUnit(*this, m_comboTargetGuid))
                 target2->RemoveComboPointHolder(GetGUIDLow());
 
-        m_comboTarget = target->GetGUID();
+        m_comboTargetGuid = target->GetObjectGuid();
         m_comboPoints = count;
 
         target->AddComboPointHolder(GetGUIDLow());
@@ -19609,7 +19724,7 @@ void Player::AddComboPoints(Unit* target, int8 count)
 
 void Player::ClearComboPoints()
 {
-    if(!m_comboTarget)
+    if (m_comboTargetGuid.IsEmpty())
         return;
 
     // without combopoints lost (duration checked in aura)
@@ -19619,10 +19734,10 @@ void Player::ClearComboPoints()
 
     SendComboPoints();
 
-    if(Unit* target = ObjectAccessor::GetUnit(*this,m_comboTarget))
+    if(Unit* target = ObjectAccessor::GetUnit(*this,m_comboTargetGuid))
         target->RemoveComboPointHolder(GetGUIDLow());
 
-    m_comboTarget = 0;
+    m_comboTargetGuid.Clear();
 }
 
 void Player::SetGroup(Group *group, int8 subgroup)
@@ -19632,7 +19747,7 @@ void Player::SetGroup(Group *group, int8 subgroup)
     else
     {
         // never use SetGroup without a subgroup unless you specify NULL for group
-        ASSERT(subgroup >= 0);
+        MANGOS_ASSERT(subgroup >= 0);
         m_group.link(group, this);
         m_group.setSubGroup((uint8)subgroup);
     }
@@ -19797,7 +19912,7 @@ void Player::SendInstanceResetWarning( uint32 mapid, Difficulty difficulty, uint
 
 void Player::ApplyEquipCooldown( Item * pItem )
 {
-    if (pItem->HasFlag(ITEM_FIELD_FLAGS, ITEM_FLAGS_NO_EQUIP_COOLDOWN))
+    if (pItem->GetProto()->Flags & ITEM_FLAG_NO_EQUIP_COOLDOWN)
         return;
 
     for(int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i)
@@ -20053,6 +20168,12 @@ void Player::SetWeeklyQuestStatus( uint32 quest_id )
     m_WeeklyQuestChanged = true;
 }
 
+void Player::SetMonthlyQuestStatus(uint32 quest_id)
+{
+    m_monthlyquests.insert(quest_id);
+    m_MonthlyQuestChanged = true;
+}
+
 void Player::ResetDailyQuestStatus()
 {
     for(uint32 quest_daily_idx = 0; quest_daily_idx < PLAYER_MAX_DAILY_QUESTS; ++quest_daily_idx)
@@ -20070,6 +20191,16 @@ void Player::ResetWeeklyQuestStatus()
     m_weeklyquests.clear();
     // DB data deleted in caller
     m_WeeklyQuestChanged = false;
+}
+
+void Player::ResetMonthlyQuestStatus()
+{
+    if (m_monthlyquests.empty())
+        return;
+
+    m_monthlyquests.clear();
+    // DB data deleted in caller
+    m_MonthlyQuestChanged = false;
 }
 
 BattleGround* Player::GetBattleGround() const
@@ -20279,7 +20410,8 @@ void Player::AutoUnequipOffhandIfNeed()
         return;
 
     // need unequip offhand for 2h-weapon without TitanGrip (in any from hands)
-    if (CanTitanGrip() || (offItem->GetProto()->InventoryType != INVTYPE_2HWEAPON && !IsTwoHandUsed()))
+    if ((CanDualWield() || offItem->GetProto()->InventoryType == INVTYPE_SHIELD || offItem->GetProto()->InventoryType == INVTYPE_HOLDABLE) &&
+        (CanTitanGrip() || (offItem->GetProto()->InventoryType != INVTYPE_2HWEAPON && !IsTwoHandUsed())))
         return;
 
     ItemPosCountVec off_dest;
@@ -20453,8 +20585,8 @@ bool Player::isHonorOrXPTarget(Unit* pVictim) const
 
     if(pVictim->GetTypeId() == TYPEID_UNIT)
     {
-        if (((Creature*)pVictim)->isTotem() ||
-            ((Creature*)pVictim)->isPet() ||
+        if (((Creature*)pVictim)->IsTotem() ||
+            ((Creature*)pVictim)->IsPet() ||
             ((Creature*)pVictim)->GetCreatureInfo()->flags_extra & CREATURE_FLAG_EXTRA_NO_XP_AT_KILL)
                 return false;
     }
@@ -20564,7 +20696,7 @@ uint32 Player::GetBaseWeaponSkillValue (WeaponAttackType attType) const
 void Player::ResurectUsingRequestData()
 {
     /// Teleport before resurrecting by player, otherwise the player might get attacked from creatures near his corpse
-    if(IS_PLAYER_GUID(m_resurrectGUID))
+    if (m_resurrectGuid.IsPlayer())
         TeleportTo(m_resurrectMap, m_resurrectX, m_resurrectY, m_resurrectZ, GetOrientation());
 
     //we cannot resurrect player when we triggered far teleport
@@ -20783,7 +20915,7 @@ void Player::SetOriginalGroup(Group *group, int8 subgroup)
     else
     {
         // never use SetOriginalGroup without a subgroup unless you specify NULL for group
-        ASSERT(subgroup >= 0);
+        MANGOS_ASSERT(subgroup >= 0);
         m_originalGroup.link(group, this);
         m_originalGroup.setSubGroup((uint8)subgroup);
     }
@@ -20981,7 +21113,7 @@ void Player::EnterVehicle(Vehicle *vehicle)
     if(!veSeat)
         return;
 
-    vehicle->SetCharmerGUID(GetGUID());
+    vehicle->SetCharmerGuid(GetObjectGuid());
     vehicle->RemoveFlag(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_SPELLCLICK);
     vehicle->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED);
     vehicle->setFaction(getFaction());
@@ -21033,7 +21165,7 @@ void Player::EnterVehicle(Vehicle *vehicle)
 
 void Player::ExitVehicle(Vehicle *vehicle)
 {
-    vehicle->SetCharmerGUID(0);
+    vehicle->SetCharmerGuid(ObjectGuid());
     vehicle->SetFlag(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_SPELLCLICK);
     vehicle->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED);
     vehicle->setFaction((GetTeam() == ALLIANCE) ? vehicle->GetCreatureInfo()->faction_A : vehicle->GetCreatureInfo()->faction_H);
@@ -21123,10 +21255,27 @@ void Player::ConvertRune(uint8 index, RuneType newType)
     GetSession()->SendPacket(&data);
 }
 
-void Player::ResyncRunes(uint8 count)
+bool Player::ActivateRunes(RuneType type, uint32 count)
 {
-    WorldPacket data(SMSG_RESYNC_RUNES, count * 2);
-    for(uint32 i = 0; i < count; ++i)
+    bool modify = false;
+    for(uint32 j = 0; count > 0 && j < MAX_RUNES; ++j)
+    {
+        if (GetRuneCooldown(j) && GetCurrentRune(j) == type)
+        {
+            SetRuneCooldown(j, 0);
+            --count;
+            modify = true;
+        }
+    }
+
+    return modify;
+}
+
+void Player::ResyncRunes()
+{
+    WorldPacket data(SMSG_RESYNC_RUNES, 4 + MAX_RUNES * 2);
+    data << uint32(MAX_RUNES);
+    for(uint32 i = 0; i < MAX_RUNES; ++i)
     {
         data << uint8(GetCurrentRune(i));                   // rune type
         data << uint8(255 - ((GetRuneCooldown(i) / REGEN_TIME_FULL) * 51));     // passed cooldown time (0-255)
@@ -21181,11 +21330,16 @@ bool Player::IsBaseRuneSlotsOnCooldown( RuneType runeType ) const
     return true;
 }
 
-void Player::AutoStoreLoot(uint8 bag, uint8 slot, uint32 loot_id, LootStore const& store, bool broadcast)
+void Player::AutoStoreLoot(uint32 loot_id, LootStore const& store, bool broadcast, uint8 bag, uint8 slot)
 {
     Loot loot;
-    loot.FillLoot (loot_id,store,this,true);
+    loot.FillLoot (loot_id, store, this, true);
 
+    AutoStoreLoot(loot, broadcast, bag, slot);
+}
+
+void Player::AutoStoreLoot(Loot& loot, bool broadcast, uint8 bag, uint8 slot)
+{
     uint32 max_slot = loot.GetMaxSlotInLootFor(this);
     for(uint32 i = 0; i < max_slot; ++i)
     {
@@ -21412,7 +21566,7 @@ uint8 Player::CanEquipUniqueItem(Item* pItem, uint8 eslot, uint32 limit_count) c
 uint8 Player::CanEquipUniqueItem( ItemPrototype const* itemProto, uint8 except_slot, uint32 limit_count) const
 {
     // check unique-equipped on item
-    if (itemProto->Flags & ITEM_FLAGS_UNIQUE_EQUIPPED)
+    if (itemProto->Flags & ITEM_FLAG_UNIQUE_EQUIPPED)
     {
         // there is an equip limit on this item
         if(HasItemOrGemWithIdEquipped(itemProto->ItemId,1,except_slot))
@@ -21461,7 +21615,7 @@ void Player::HandleFall(MovementInfo const& movementInfo)
             uint32 damage = (uint32)(damageperc * GetMaxHealth()*sWorld.getConfig(CONFIG_FLOAT_RATE_DAMAGE_FALL));
 
             float height = movementInfo.GetPos()->z;
-            UpdateGroundPositionZ(movementInfo.GetPos()->x, movementInfo.GetPos()->y, height);
+            UpdateAllowedPositionZ(movementInfo.GetPos()->x, movementInfo.GetPos()->y, height);
 
             if (damage > 0)
             {
@@ -21602,14 +21756,13 @@ void Player::LearnTalent(uint32 talentId, uint32 talentRank)
     DETAIL_LOG("TalentID: %u Rank: %u Spell: %u\n", talentId, talentRank, spellid);
 }
 
-void Player::LearnPetTalent(uint64 petGuid, uint32 talentId, uint32 talentRank)
+void Player::LearnPetTalent(ObjectGuid petGuid, uint32 talentId, uint32 talentRank)
 {
     Pet *pet = GetPet();
-
-    if(!pet)
+    if (!pet)
         return;
 
-    if(petGuid != pet->GetGUID())
+    if (petGuid != pet->GetObjectGuid())
         return;
 
     uint32 CurTalentPoints = pet->GetFreeTalentPoints();
@@ -21758,24 +21911,21 @@ void Player::UnsummonPetTemporaryIfAny()
         return;
 
     if(!m_temporaryUnsummonedPetNumber && pet->isControlled() && !pet->isTemporarySummoned() )
-    {
         m_temporaryUnsummonedPetNumber = pet->GetCharmInfo()->GetPetNumber();
-        m_oldpetspell = pet->GetUInt32Value(UNIT_CREATED_BY_SPELL);
-    }
 
     RemovePet(pet, PET_SAVE_AS_CURRENT);
 }
 
 void Player::ResummonPetTemporaryUnSummonedIfAny()
 {
-    if(!m_temporaryUnsummonedPetNumber)
+    if (!m_temporaryUnsummonedPetNumber)
         return;
 
     // not resummon in not appropriate state
-    if(IsPetNeedBeTemporaryUnsummoned())
+    if (IsPetNeedBeTemporaryUnsummoned())
         return;
 
-    if(GetPetGUID())
+    if (!GetPetGuid().IsEmpty())
         return;
 
     Pet* NewPet = new Pet;
@@ -22339,7 +22489,7 @@ void Player::SendDuelCountdown(uint32 counter)
     GetSession()->SendPacket(&data);
 }
 
-bool Player::IsImmunedToSpellEffect(SpellEntry const* spellInfo, SpellEffectIndex index) const
+bool Player::IsImmuneToSpellEffect(SpellEntry const* spellInfo, SpellEffectIndex index) const
 {
     switch(spellInfo->Effect[index])
     {
@@ -22355,7 +22505,7 @@ bool Player::IsImmunedToSpellEffect(SpellEntry const* spellInfo, SpellEffectInde
         default:
             break;
     }
-    return Unit::IsImmunedToSpellEffect(spellInfo, index);
+    return Unit::IsImmuneToSpellEffect(spellInfo, index);
 }
 
 void Player::SetHomebindToLocation(WorldLocation const& loc, uint32 area_id)

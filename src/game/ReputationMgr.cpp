@@ -70,31 +70,9 @@ int32 ReputationMgr::GetBaseReputation(FactionEntry const* factionEntry) const
     uint32 raceMask = m_player->getRaceMask();
     uint32 classMask = m_player->getClassMask();
 
-    if (m_player->IsTraitor())
-    {
-        uint32 raceMaskReal = m_player->getRaceMaskReal();
+    int idx = factionEntry->GetIndexFitTo(raceMask, classMask);
 
-        for (int i=0; i < 4; i++)
-        {
-            if( (factionEntry->BaseRepRaceMask[i] & raceMask) &&
-                (factionEntry->BaseRepClassMask[i]==0 ||
-                (factionEntry->BaseRepClassMask[i] & classMask) ) )
-                return factionEntry->BaseRepValue[i];
-        }
-    }
-    else
-    {
-        for (int i=0; i < 4; i++)
-        {
-            if( (factionEntry->BaseRepRaceMask[i] & raceMask) &&
-                (factionEntry->BaseRepClassMask[i]==0 ||
-                (factionEntry->BaseRepClassMask[i] & classMask) ) )
-                return factionEntry->BaseRepValue[i];
-        }
-    }
-
-    // in faction.dbc exist factions with (RepListId >=0, listed in character reputation list) with all BaseRepRaceMask[i]==0
-    return 0;
+    return idx >= 0 ? factionEntry->BaseRepValue[idx] : 0;
 }
 
 /**
@@ -111,7 +89,7 @@ int32 ReputationMgr::GetBaseReputationDifference(uint32 faction_id) const
 
     if (!factionEntry)
     {
-        sLog.outError("ReputationMgr::GetBaseReputationOpposite: Can't get reputation of %s for unknown faction (faction id) #%u.",m_player->GetName(), faction_id);
+        sLog.outError("ReputationMgr::GetBaseReputationDifference: Can't get reputation of %s for unknown faction (faction id) #%u.",m_player->GetName(), faction_id);
         return 0;
     }
 
@@ -133,40 +111,19 @@ int32 ReputationMgr::GetBaseReputationDifference(FactionEntry const* factionEntr
 
     uint32 raceMask = m_player->getRaceMask();
     uint32 classMask = m_player->getClassMask();
+    uint32 diffvalue = 0;
 
     if (m_player->IsTraitor())
     {
         uint32 raceMaskReal = m_player->getRaceMaskReal();
+        int diffidx = factionEntry->GetIndexFitTo(raceMaskReal, classMask);
 
-        for (int i=0; i < 4; i++)
-        {
-            if( (factionEntry->BaseRepRaceMask[i] & raceMask) &&
-                (factionEntry->BaseRepClassMask[i]==0 ||
-                (factionEntry->BaseRepClassMask[i] & classMask) ) )
-            {
-                for (int ri=0; ri < 4; ri++)
-                {
-                    if( (factionEntry->BaseRepRaceMask[ri] & raceMaskReal) &&
-                        (factionEntry->BaseRepClassMask[ri]==0 ||
-                        (factionEntry->BaseRepClassMask[ri] & classMask) ) )
-                        return factionEntry->BaseRepValue[i] - factionEntry->BaseRepValue[ri];
-                }
-            }
-        }
-    }
-    else
-    {
-        for (int i=0; i < 4; i++)
-        {
-            if( (factionEntry->BaseRepRaceMask[i] & raceMask) &&
-                (factionEntry->BaseRepClassMask[i]==0 ||
-                (factionEntry->BaseRepClassMask[i] & classMask) ) )
-                return factionEntry->BaseRepValue[i];
-        }
+        diffvalue = factionEntry->BaseRepValue[diffidx];
     }
 
-    // in faction.dbc exist factions with (RepListId >=0, listed in character reputation list) with all BaseRepRaceMask[i]==0
-    return 0;
+    int idx = factionEntry->GetIndexFitTo(raceMask, classMask);
+
+    return idx >= 0 ? factionEntry->BaseRepValue[idx] - diffvalue: 0;
 }
 
 int32 ReputationMgr::GetReputation(FactionEntry const* factionEntry) const
@@ -208,14 +165,10 @@ uint32 ReputationMgr::GetDefaultStateFlags(FactionEntry const* factionEntry) con
 
     uint32 raceMask = m_player->getRaceMask();
     uint32 classMask = m_player->getClassMask();
-    for (int i=0; i < 4; i++)
-    {
-        if( (factionEntry->BaseRepRaceMask[i] & raceMask) &&
-            (factionEntry->BaseRepClassMask[i]==0 ||
-            (factionEntry->BaseRepClassMask[i] & classMask) ) )
-            return factionEntry->ReputationFlags[i];
-    }
-    return 0;
+
+    int idx = factionEntry->GetIndexFitTo(raceMask, classMask);
+
+    return idx >= 0 ? factionEntry->ReputationFlags[idx] : 0;
 }
 
 void ReputationMgr::SendForceReactions()

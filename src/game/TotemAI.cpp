@@ -30,7 +30,7 @@
 int
 TotemAI::Permissible(const Creature *creature)
 {
-    if( creature->isTotem() )
+    if( creature->IsTotem() )
         return PERMIT_BASE_PROACTIVE;
 
     return PERMIT_BASE_NO;
@@ -81,7 +81,7 @@ TotemAI::UpdateAI(const uint32 /*diff*/)
         victim = NULL;
 
         MaNGOS::NearestAttackableUnitInObjectRangeCheck u_check(m_creature, m_creature, max_range);
-        MaNGOS::UnitLastSearcher<MaNGOS::NearestAttackableUnitInObjectRangeCheck> checker(m_creature,victim, u_check);
+        MaNGOS::UnitLastSearcher<MaNGOS::NearestAttackableUnitInObjectRangeCheck> checker(victim, u_check);
         Cell::VisitAllObjects(m_creature, checker, max_range);
     }
 
