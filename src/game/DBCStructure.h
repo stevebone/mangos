@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005-2010 MaNGOS <http://getmangos.com/>
+ * Copyright (C) 2005-2011 MaNGOS <http://getmangos.com/>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -711,7 +711,7 @@ struct CreatureDisplayInfoEntry
     uint32      Displayid;                                  // 0        m_ID
                                                             // 1        m_modelID
                                                             // 2        m_soundID
-                                                            // 3        m_extendedDisplayInfoID
+    uint32      ExtendedDisplayInfoID;                      // 3        m_extendedDisplayInfoID -> CreatureDisplayInfoExtraEntry::DisplayExtraId
     float       scale;                                      // 4        m_creatureModelScale
                                                             // 5        m_creatureModelAlpha
                                                             // 6-8      m_textureVariation[3]
@@ -722,6 +722,21 @@ struct CreatureDisplayInfoEntry
                                                             // 13       m_particleColorID
                                                             // 14       m_creatureGeosetData
                                                             // 15       m_objectEffectPackageID
+};
+
+struct CreatureDisplayInfoExtraEntry
+{
+    uint32      DisplayExtraId;                             // 0        CreatureDisplayInfoEntry::m_extendedDisplayInfoID
+    uint32      Race;                                       // 1
+    //uint32    Gender;                                     // 2        Model gender, exist not small amount cases when query creature data return different gender from used model, so can't be replacement for model gender field.
+    //uint32    SkinColor;                                  // 3
+    //uint32    FaceType;                                   // 4
+    //uint32    HairType;                                   // 5        CharHairGeosets.dbc
+    //uint32    HairStyle;                                  // 6        CharSections.dbc, where GeneralType=3
+    //uint32    BeardStyle;                                 // 7
+    //uint32    Equipment[11];                              // 8-18     equipped static items EQUIPMENT_SLOT_HEAD..EQUIPMENT_SLOT_HANDS, client show its by self
+    //uint32    CanEquip;                                   // 19       0..1 Can equip additional things when used for players
+    //char*                                                 // 20       CreatureDisplayExtra-*.blp
 };
 
 struct CreatureFamilyEntry
@@ -1000,17 +1015,16 @@ struct HolidayNamesEntry
 struct HolidaysEntry
 {
     uint32 ID;                                              // 0, holiday id
-    //uint32 unk1;                                          // 1
-    //uint32 unk2;                                          // 2
-    //uint32 unk3[8]                                        // 3-10, empty fields
-    //uint32 unk11[13]                                      // 11-23, some unknown data (bit strings?)
-    //uint32 unk11[13]                                      // 24-36, some empty fields (continue prev?)
-    //uint32 unk11[12]                                      // 37-48, counters?
+    //uint32 unk1[10];                                      // 1-10 timers
+    //uint32 Dates[26];                                     // 11-36, dates in unix time starting at January, 1, 2000
+    //uint32 unk37;                                         // 37, flags (wow region mask?)
+    //uint32 unk38;                                         // 38, flags (display related?)
+    //uint32 unk39[10];                                     // 39-48, counters?
     //uint32 holidayNameId;                                 // 49, id for HolidayNames.dbc
     //uint32 holidayDescriptionId;                          // 50, id for HolidayDescriptions.dbc
-    //uint32 unk51;                                         // 51
+    //char *texture;                                        // 51
     //uint32 unk52;                                         // 52
-    //uint32 unk53;                                         // 53
+    //uint32 RepeatingMethod;                               // 53, (-1,0,1 or 2)
     //uint32 unk54;                                         // 54
 };
 
@@ -1057,14 +1071,16 @@ struct ItemDisplayInfoEntry
 //    uint32      arenaseason;                              // arena season number(1-4)
 //};
 
+#define MAX_EXTENDED_COST_ITEMS 5
+
 struct ItemExtendedCostEntry
 {
     uint32      ID;                                         // 0 extended-cost entry id
     uint32      reqhonorpoints;                             // 1 required honor points
     uint32      reqarenapoints;                             // 2 required arena points
-    uint32      reqarenaslot;                               // 4 arena slot restrctions (min slot value)
-    uint32      reqitem[5];                                 // 5-8 required item id
-    uint32      reqitemcount[5];                            // 9-13 required count of 1st item
+    uint32      reqarenaslot;                               // 4 arena slot restrictions (min slot value)
+    uint32      reqitem[MAX_EXTENDED_COST_ITEMS];           // 5-8 required item id
+    uint32      reqitemcount[MAX_EXTENDED_COST_ITEMS];      // 9-13 required count of 1st item
     uint32      reqpersonalarenarating;                     // 14 required personal arena rating
 };
 
@@ -1168,7 +1184,7 @@ struct MapEntry
             MapID==209 || MapID==269 || MapID==309 ||       // TanarisInstance, CavernsOfTime, Zul'gurub
             MapID==509 || MapID==534 || MapID==560 ||       // AhnQiraj, HyjalPast, HillsbradPast
             MapID==568 || MapID==580 || MapID==595 ||       // ZulAman, Sunwell Plateau, Culling of Stratholme
-            MapID==615 || MapID==616;                       // Obsidian Sanctum, Eye Of Eternity
+            MapID==603 || MapID==615 || MapID==616;         // Ulduar, The Obsidian Sanctum, The Eye Of Eternity
     }
 
     bool IsContinent() const
@@ -1194,6 +1210,15 @@ struct MovieEntry
     uint32      Id;                                         // 0 index
     //char*       filename;                                 // 1
     //uint32      unk2;                                     // 2 always 100
+};
+
+#define MAX_OVERRIDE_SPELLS     10
+
+struct OverrideSpellDataEntry
+{
+    uint32      Id;                                         // 0 index
+    uint32      Spells[MAX_OVERRIDE_SPELLS];                // 1-10 spells
+    //uint32      unk2;                                     // 11 possibly flag
 };
 
 struct PvPDifficultyEntry
@@ -1410,9 +1435,9 @@ struct SpellEntry
     uint32    AttributesEx6;                                // 10       m_attributesExF
     uint32    AttributesEx7;                                // 11       m_attributesExG (0x20 - totems, 0x4 - paladin auras, etc...)
     uint32    Stances;                                      // 12       m_shapeshiftMask
-    // uint32 unk_320_2;                                    // 13       3.2.0
+    // uint32 unk_320_1;                                    // 13       3.2.0
     uint32    StancesNot;                                   // 14       m_shapeshiftExclude
-    // uint32 unk_320_3;                                    // 15       3.2.0
+    // uint32 unk_320_2;                                    // 15       3.2.0
     uint32    Targets;                                      // 16       m_targets
     uint32    TargetCreatureType;                           // 17       m_targetCreatureType
     uint32    RequiresSpellFocus;                           // 18       m_requiresSpellFocus
@@ -1506,7 +1531,7 @@ struct SpellEntry
     uint32    runeCostID;                                   // 226      m_runeCostID
     //uint32    spellMissileID;                             // 227      m_spellMissileID not used
     //uint32  PowerDisplayId;                               // 228      m_powerDisplayID - id from PowerDisplay.dbc, new in 3.1
-    //float   unk_320_4[3];                                 // 229-231  3.2.0
+    //float   unk_320_3[3];                                 // 229-231  3.2.0
     //uint32  spellDescriptionVariableID;                   // 232      m_spellDescriptionVariableID, 3.2.0
     uint32  SpellDifficultyId;                              // 233      m_spellDifficultyID - id from SpellDifficulty.dbc
 
@@ -1515,6 +1540,16 @@ struct SpellEntry
     uint32 const* GetEffectSpellClassMask(SpellEffectIndex effect) const
     {
         return EffectSpellClassMaskA + effect * 3;
+    }
+
+    bool IsFitToFamilyMask(uint64 familyFlags, uint32 familyFlags2 = 0) const
+    {
+        return (SpellFamilyFlags & familyFlags) || (SpellFamilyFlags2 & familyFlags2);
+    }
+
+    bool IsFitToFamily(SpellFamily family, uint64 familyFlags, uint32 familyFlags2 = 0) const
+    {
+        return SpellFamily(SpellFamilyName) == family && IsFitToFamilyMask(familyFlags, familyFlags2);
     }
 
     private:

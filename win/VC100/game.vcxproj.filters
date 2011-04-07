@@ -22,6 +22,9 @@
     <Filter Include="References">
       <UniqueIdentifier>{64bb42b8-e7ba-4247-b337-492f644daeeb}</UniqueIdentifier>
     </Filter>
+    <Filter Include="vmaps">
+      <UniqueIdentifier>{948284d3-9d89-4609-8cdd-28a213edb53e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\game\AccountMgr.cpp">
@@ -141,9 +144,6 @@
     <ClCompile Include="..\..\src\game\InstanceData.cpp">
       <Filter>World/Handlers</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\game\InstanceSaveMgr.cpp">
-      <Filter>World/Handlers</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\src\game\ItemHandler.cpp">
       <Filter>World/Handlers</Filter>
     </ClCompile>
@@ -160,6 +160,12 @@
       <Filter>World/Handlers</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\game\MapManager.cpp">
+      <Filter>World/Handlers</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\game\MapPersistentStateMgr.cpp">
+      <Filter>World/Handlers</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\game\MassMailMgr.cpp">
       <Filter>World/Handlers</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\game\MiscHandler.cpp">
@@ -192,7 +198,7 @@
     <ClCompile Include="..\..\src\game\QuestHandler.cpp">
       <Filter>World/Handlers</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\game\ScriptCalls.cpp">
+    <ClCompile Include="..\..\src\game\ScriptMgr.cpp">
       <Filter>World/Handlers</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\game\SkillDiscovery.cpp">
@@ -396,6 +402,9 @@
     <ClCompile Include="..\..\src\game\Opcodes.cpp">
       <Filter>Server</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\game\SQLStorages.cpp">
+      <Filter>Server</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\game\WorldSession.cpp">
       <Filter>Server</Filter>
     </ClCompile>
@@ -444,6 +453,27 @@
     </ClCompile>
     <ClCompile Include="..\..\src\game\UnitAuraProcHandler.cpp">
       <Filter>World/Handlers</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\game\vmap\BIH.cpp">
+      <Filter>vmaps</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\game\vmap\MapTree.cpp">
+      <Filter>vmaps</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\game\vmap\ModelInstance.cpp">
+      <Filter>vmaps</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\game\vmap\TileAssembler.cpp">
+      <Filter>vmaps</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\game\vmap\VMapFactory.cpp">
+      <Filter>vmaps</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\game\vmap\VMapManager2.cpp">
+      <Filter>vmaps</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\game\vmap\WorldModel.cpp">
+      <Filter>vmaps</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -540,9 +570,6 @@
     <ClInclude Include="..\..\src\game\InstanceData.h">
       <Filter>World/Handlers</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\src\game\InstanceSaveMgr.h">
-      <Filter>World/Handlers</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\src\game\Mail.h">
       <Filter>World/Handlers</Filter>
     </ClInclude>
@@ -550,6 +577,12 @@
       <Filter>World/Handlers</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\game\MapManager.h">
+      <Filter>World/Handlers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\MapPersistentStateMgr.h">
+      <Filter>World/Handlers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\MassMailMgr.h">
       <Filter>World/Handlers</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\game\NPCHandler.h">
@@ -567,7 +600,7 @@
     <ClInclude Include="..\..\src\game\QuestDef.h">
       <Filter>World/Handlers</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\src\game\ScriptCalls.h">
+    <ClInclude Include="..\..\src\game\ScriptMgr.h">
       <Filter>World/Handlers</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\game\SkillDiscovery.h">
@@ -789,6 +822,9 @@
     <ClInclude Include="..\..\src\game\SharedDefines.h">
       <Filter>Server</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\game\SQLStorages.h">
+      <Filter>Server</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\game\WorldSession.h">
       <Filter>Server</Filter>
     </ClInclude>
@@ -834,6 +870,36 @@
     </ClInclude>
     <ClInclude Include="..\..\src\game\Camera.h">
       <Filter>Object</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\vmap\BIH.h">
+      <Filter>vmaps</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\vmap\IVMapManager.h">
+      <Filter>vmaps</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\vmap\MapTree.h">
+      <Filter>vmaps</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\vmap\ModelInstance.h">
+      <Filter>vmaps</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\vmap\TileAssembler.h">
+      <Filter>vmaps</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\vmap\VMapDefinitions.h">
+      <Filter>vmaps</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\vmap\VMapFactory.h">
+      <Filter>vmaps</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\vmap\VMapManager2.h">
+      <Filter>vmaps</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\vmap\VMapTools.h">
+      <Filter>vmaps</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\game\vmap\WorldModel.h">
+      <Filter>vmaps</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

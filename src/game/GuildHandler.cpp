@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005-2010 MaNGOS <http://getmangos.com/>
+ * Copyright (C) 2005-2011 MaNGOS <http://getmangos.com/>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -89,7 +89,7 @@ void WorldSession::HandleGuildInviteOpcode(WorldPacket& recvPacket)
     }
 
     // OK result but not send invite
-    if(player->GetSocial()->HasIgnore(GetPlayer()->GetGUIDLow()))
+    if(player->GetSocial()->HasIgnore(GetPlayer()->GetObjectGuid()))
         return;
 
     // not let enemies sign guild charter
@@ -126,7 +126,7 @@ void WorldSession::HandleGuildInviteOpcode(WorldPacket& recvPacket)
         if (player->IsInWorld())
         {
             player->GetSession()->SendNotification("You have been invited to join an enemy guild.");
-            sWorld.SendServerMessage(SERVER_MSG_STRING, "By joining an enemy guild, you will be a traitor. You will lose your reputation with your people.", player);
+            sWorld.SendServerMessage(SERVER_MSG_CUSTOM, "By joining an enemy guild, you will be a traitor. You will lose your reputation with your people.", player);
         }
 
     player->SetGuildIdInvited(GetPlayer()->GetGuildId());
