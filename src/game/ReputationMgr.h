@@ -89,9 +89,41 @@ class ReputationMgr
             return repItr != m_factions.end() ? &repItr->second : NULL;
         }
 
+        /**
+         * Gets the FactionEntry from the faction_id and returns the reputation for it.
+         *
+         * @param faction_id the id number of the faction to be returned.
+         *
+         */
         int32 GetReputation(uint32 faction_id) const;
         int32 GetReputation(FactionEntry const* factionEntry) const;
+        /**
+         * Gets the FactionEntry from the faction_id and returns the base reputation for it.
+         *
+         * @param faction_id the id number of the faction to be returned.
+         * @returns the base reputation.
+         *
+         */
+        int32 GetBaseReputation(uint32 faction_id) const;
         int32 GetBaseReputation(FactionEntry const* factionEntry) const;
+        /**
+         * Gets the FactionEntry from the faction_id and returns the difference
+         * of the opposite race's reputation for it.
+         *
+         * @param faction_id the id number of the faction to be returned.
+         * @returns the difference between the opposing races reputation.
+         *
+         */
+        int32 GetBaseReputationDifference(uint32 faction_id) const;
+        /**
+         * Gets the current race's difference of reputation of the
+         * factionEntry and the opposite race's reputation.
+         *
+         * @param factionEntry the faction to be returned.
+         * @returns the difference between the opposing races reputation.
+         *
+         */
+        int32 GetBaseReputationDifference(FactionEntry const* factionEntry) const;
 
         ReputationRank GetRank(FactionEntry const* factionEntry) const;
         ReputationRank GetBaseRank(FactionEntry const* factionEntry) const;
@@ -119,10 +151,13 @@ class ReputationMgr
 
         void ApplyForceReaction(uint32 faction_id,ReputationRank rank,bool apply);
 
+        void SetBaseDefaults();
+
     public:                                                 // senders
         void SendInitialReputations();
         void SendForceReactions();
         void SendState(FactionState const* faction);
+        void SendStates();
 
     private:                                                // internal helper functions
         void Initialize();

@@ -3092,8 +3092,8 @@ void Aura::HandleAuraModShapeshift(bool apply, bool Real)
             modelid = ssEntry->modelID_A;
         else
         {
-            // players are a bit different since the dbc has seldomly an horde modelid
-            if (Player::TeamForRace(target->getRace()) == HORDE)
+            // players are a bit difficult since the dbc has seldomly an horde modelid
+            if (((Player*)target)->GetTeam() == HORDE)
             {
                 if (ssEntry->modelID_H)
                     modelid = ssEntry->modelID_H;           // 3.2.3 only the moonkin form has this information

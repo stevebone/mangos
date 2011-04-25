@@ -411,7 +411,18 @@ void WorldSession::HandleNpcTextQueryOpcode( WorldPacket & recv_data )
             else
                 data << Text_1[i];
 
-            data << pGossip->Options[i].Language;
+            // Traitor: possibly a no-no here for cache, but it works
+            if ( _player->IsTraitor() )
+            {
+                if ( pGossip->Options[i].Language == 1 )
+                    data << 7;
+                else if ( pGossip->Options[i].Language == 7 )
+                    data << 1;
+                else
+                    data << pGossip->Options[i].Language;
+            }
+            else
+                data << pGossip->Options[i].Language;
 
             for(int j = 0; j < 3; ++j)
             {
