@@ -2642,8 +2642,23 @@ void ObjectMgr::LoadPetLevelInfo()
         {
             if(pInfo[level].health == 0)
             {
-                sLog.outErrorDb("Creature %u has no data for Level %i pet stats data, using data of Level %i.",itr->first,level+1, level);
-                pInfo[level] = pInfo[level-1];
+                //sLog.outErrorDb("Creature %u has no data for Level %i pet stats data, using custom data.",itr->first,level+1);
+
+                //pInfo[level] = pInfo[level-1];
+
+                               pInfo[level].stats[0] = pInfo[level-1].stats[0] +5; //Strength
+
+                               pInfo[level].stats[1] = pInfo[level-1].stats[1] +5; //Agility
+
+                               pInfo[level].stats[2] = pInfo[level-1].stats[2] +5; //Stamina
+
+                               pInfo[level].stats[3] = pInfo[level-1].stats[3] +5; //Intellect
+
+                               pInfo[level].stats[4] = pInfo[level-1].stats[4] +5; //Spirit
+
+                               pInfo[level].health = pInfo[level-1].health * 1.2;  //Health
+
+                               pInfo[level].mana = pInfo[level-1].mana * 1.2;      //Mana
             }
         }
     }
@@ -3035,8 +3050,12 @@ void ObjectMgr::LoadPlayerInfo()
         {
             if(pClassInfo->levelInfo[level].basehealth == 0)
             {
-                sLog.outErrorDb("Class %i Level %i does not have health/mana data. Using stats data of level %i.",class_,level+1, level);
-                pClassInfo->levelInfo[level] = pClassInfo->levelInfo[level-1];
+                //sLog.outErrorDb("Class %i Level %i does not have health/mana data. Using stats data of level %i * 1.1.",class_,level+1, level);
+                //pClassInfo->levelInfo[level] = pClassInfo->levelInfo[level-1];
+
+                               pClassInfo->levelInfo[level].basehealth = pClassInfo->levelInfo[level-1].basehealth * 1.2; //Health
+
+                               pClassInfo->levelInfo[level].basemana = pClassInfo->levelInfo[level-1].basemana * 1.2;     //Mana
             }
         }
     }
@@ -3158,8 +3177,19 @@ void ObjectMgr::LoadPlayerInfo()
             {
                 if(pInfo->levelInfo[level].stats[0] == 0)
                 {
-                    sLog.outErrorDb("Race %i Class %i Level %i does not have stats data. Using stats data of level %i.",race,class_,level+1, level);
-                    pInfo->levelInfo[level] = pInfo->levelInfo[level-1];
+                    //sLog.outErrorDb("Race %i Class %i Level %i does not have stats data. Using custom data.",race,class_,level+1);
+
+                                       //pInfo->levelInfo[level] = pInfo->levelInfo[level-1];
+
+                                       pInfo->levelInfo[level].stats[0] = pInfo->levelInfo[level-1].stats[0] +5; //Strength
+
+                                       pInfo->levelInfo[level].stats[1] = pInfo->levelInfo[level-1].stats[1] +5; //Agility
+
+                                       pInfo->levelInfo[level].stats[2] = pInfo->levelInfo[level-1].stats[2] +5; //Stamina
+
+                                       pInfo->levelInfo[level].stats[3] = pInfo->levelInfo[level-1].stats[3] +5; //Intellect
+
+                                       pInfo->levelInfo[level].stats[4] = pInfo->levelInfo[level-1].stats[4] +5; //Spirit
                 }
             }
         }
@@ -3225,8 +3255,8 @@ void ObjectMgr::LoadPlayerInfo()
     {
         if( mPlayerXPperLevel[level] == 0)
         {
-            sLog.outErrorDb("Level %i does not have XP for level data. Using data of level [%i] + 100.",level+1, level);
-            mPlayerXPperLevel[level] = mPlayerXPperLevel[level-1]+100;
+            //sLog.outErrorDb("Level %i does not have XP for level data. Using data of level [%i] + 100.",level+1, level);
+            mPlayerXPperLevel[level] = mPlayerXPperLevel[level-1] * 1.05;  //2% more XP than current level
         }
     }
 }
