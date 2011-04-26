@@ -335,11 +335,11 @@ void ReputationMgr::SetBaseDefaults()
                 (defaultFlags & FACTION_FLAG_AT_WAR) ||
                 (defaultFlags & FACTION_FLAG_PEACE_FORCED) )
             {
-/*                if (faction->Standing != 0)
+                if (faction->Standing != 0)
                 {
                     faction->Standing = 0;
                     faction->needSend = true;
-                } */
+                }
 
                 if (faction->Flags != defaultFlags)
                 {

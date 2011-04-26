@@ -239,10 +239,10 @@ bool WorldSession::Update(uint32 diff, PacketFilter& updater)
 
                     // lag can cause STATUS_LOGGEDIN opcodes to arrive after the player started a transfer
 
-					// playerbot mod
-					if (_player && _player->GetPlayerbotMgr())
-						_player->GetPlayerbotMgr()->HandleMasterIncomingPacket(*packet);
-					// playerbot mod end
+                    // playerbot mod
+                    if (_player && _player->GetPlayerbotMgr())
+                        _player->GetPlayerbotMgr()->HandleMasterIncomingPacket(*packet);
+                    // playerbot mod end
                     break;
                 case STATUS_LOGGEDIN_OR_RECENTLY_LOGGEDOUT:
                     if(!_player && !m_playerRecentlyLogout)
@@ -466,10 +466,10 @@ void WorldSession::LogoutPlayer(bool Save)
         ///- Reset the online field in the account table
         // no point resetting online in character table here as Player::SaveToDB() will set it to 1 since player has not been removed from world at this stage
         // No SQL injection as AccountID is uint32
+        static SqlStatementID id;
+
         if (! _player->GetPlayerbotAI())
         {
-            static SqlStatementID id;
-
             SqlStatement stmt = LoginDatabase.CreateStatement(id, "UPDATE account SET active_realm_id = ? WHERE id = ?");
             stmt.PExecute(uint32(0), GetAccountId());
         }
