@@ -303,6 +303,8 @@ public:
     void SetState(BotState state);
     void SetQuestNeedItems();
     void SendQuestItemList(Player& player);
+    bool IsInQuestItemList(uint32 itemid) { return m_needItemList.find(itemid) != m_needItemList.end(); };
+    bool IsItemUseful(uint32 itemid);
     void SendOrders(Player& player);
     bool FollowCheckTeleport(WorldObject &obj);
     void DoLoot();
