@@ -285,7 +285,7 @@ class MANGOS_DLL_SPEC WorldSession
 
         void QueuePacket(WorldPacket* new_packet);
 
-        bool Update(uint32 diff, PacketFilter& updater);
+        bool Update(PacketFilter& updater);
 
         /// Handle the authentication waiting queue (to be completed)
         void SendAuthWaitQue(uint32 position);
@@ -357,6 +357,9 @@ class MANGOS_DLL_SPEC WorldSession
         void SendAuctionRemovedNotification(AuctionEntry* auction);
         void SendAuctionOutbiddedMail(AuctionEntry *auction);
         void SendAuctionCancelledToBidderMail(AuctionEntry *auction);
+        void BuildListAuctionItems(std::list<AuctionEntry*> &auctions, WorldPacket& data, std::wstring const& searchedname, uint32 listfrom, uint32 levelmin,
+            uint32 levelmax, uint32 usable, uint32 inventoryType, uint32 itemClass, uint32 itemSubClass, uint32 quality, uint32& count, uint32& totalcount, bool isFull);
+
         AuctionHouseEntry const* GetCheckedAuctionHouseForAuctioneer(ObjectGuid guid);
 
         //Item Enchantment
