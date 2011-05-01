@@ -941,6 +941,17 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                     m_caster->CastSpell(m_caster, spell_id, true, NULL);
                     return;
                 }
+                case 17950:                                 // Shadow Portal
+                {
+                    if (!unitTarget)
+                        return;
+
+                    // Shadow Portal
+                    const uint32 spell_list[6] = {17863, 17939, 17943, 17944, 17946, 17948};
+
+                    m_caster->CastSpell(unitTarget, spell_list[urand(0, 5)], true);
+                    return;
+                }
                 case 19411:                                 // Lava Bomb
                 case 20474:                                 // Lava Bomb
                 {
@@ -1973,6 +1984,36 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                         case EFFECT_INDEX_2:
                             return;
                     }
+                    return;
+                }
+                case 52369:                                 // Detonate Explosives
+                case 52371:                                 // Detonate Explosives
+                {
+                    if (!unitTarget)
+                        return;
+
+                    // Cosmetic - Explosion
+                    unitTarget->CastSpell(unitTarget, 46419, true);
+
+                    // look for gameobjects within max spell range of unitTarget, and respawn if found
+                    std::list<GameObject*> lList;
+
+                    float fMaxDist = GetSpellMaxRange(sSpellRangeStore.LookupEntry(m_spellInfo->rangeIndex));
+
+                    MaNGOS::GameObjectEntryInPosRangeCheck go_check(*unitTarget, 182071, unitTarget->GetPositionX(), unitTarget->GetPositionY(), unitTarget->GetPositionZ(), fMaxDist);
+                    MaNGOS::GameObjectListSearcher<MaNGOS::GameObjectEntryInPosRangeCheck> checker(lList, go_check);
+
+                    Cell::VisitGridObjects(unitTarget, checker, fMaxDist);
+
+                    for(std::list<GameObject*>::iterator iter = lList.begin(); iter != lList.end(); ++iter)
+                    {
+                        if (!(*iter)->isSpawned())
+                        {
+                            (*iter)->SetRespawnTime(MINUTE/2);
+                            (*iter)->Refresh();
+                        }
+                    }
+
                     return;
                 }
                 case 52759:                                 // Ancestral Awakening
