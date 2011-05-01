@@ -31,6 +31,8 @@ struct MANGOS_DLL_DECL instance_deadmines : public ScriptedInstance
     uint32 m_auiEncounter[MAX_ENCOUNTER];
 
     uint64 m_uiFactoryDoorGUID;
+    uint64 m_uiMastRoomDoorGUID;
+    uint64 m_uiFoundryDoorGUID;
     uint64 m_uiIronCladGUID;
     uint64 m_uiCannonGUID;
     uint64 m_uiSmiteChestGUID;
@@ -44,6 +46,8 @@ struct MANGOS_DLL_DECL instance_deadmines : public ScriptedInstance
         memset(&m_auiEncounter, 0, sizeof(m_auiEncounter));
 
         m_uiFactoryDoorGUID = 0;
+        m_uiMastRoomDoorGUID = 0;
+        m_uiFoundryDoorGUID = 0;
         m_uiIronCladGUID = 0;
         m_uiCannonGUID = 0;
         m_uiSmiteChestGUID = 0;
@@ -65,10 +69,26 @@ struct MANGOS_DLL_DECL instance_deadmines : public ScriptedInstance
         {
             case GO_FACTORY_DOOR:
                 m_uiFactoryDoorGUID = pGo->GetGUID();
+
                 if (GetData(TYPE_RHAHKZOR) == DONE)
                     pGo->SetGoState(GO_STATE_ACTIVE);
+
                 break;
-            case GO_IRON_CLAD:
+            case GO_MAST_ROOM_DOOR:
+                m_uiMastRoomDoorGUID = pGo->GetGUID();
+
+                if (GetData(TYPE_SNEED) == DONE)
+                    pGo->SetGoState(GO_STATE_ACTIVE);
+
+                break;
+            case GO_FOUNDRY_DOOR:
+                m_uiFoundryDoorGUID = pGo->GetGUID();
+
+                if (GetData(TYPE_GILNID) == DONE)
+                    pGo->SetGoState(GO_STATE_ACTIVE);
+
+                break;
+            case GO_IRON_CLAD_DOOR:
                 m_uiIronCladGUID = pGo->GetGUID();
                 break;
             case GO_DEFIAS_CANNON:
@@ -82,8 +102,18 @@ struct MANGOS_DLL_DECL instance_deadmines : public ScriptedInstance
 
     void OnCreatureDeath(Creature* pCreature)
     {
-        if (pCreature->GetEntry() == NPC_RHAHKZOR)
-            SetData(TYPE_RHAHKZOR, DONE);
+        switch(pCreature->GetEntry())
+        {
+            case NPC_RHAHKZOR:
+                SetData(TYPE_RHAHKZOR, DONE);
+                break;
+            case NPC_SNEED:
+                SetData(TYPE_SNEED, DONE);
+                break;
+            case NPC_GILNID:
+                SetData(TYPE_GILNID, DONE);
+                break;
+        }
     }
 
     void SetData(uint32 uiType, uint32 uiData)
@@ -96,6 +126,22 @@ struct MANGOS_DLL_DECL instance_deadmines : public ScriptedInstance
                     DoUseDoorOrButton(m_uiFactoryDoorGUID);
 
                 m_auiEncounter[1] = uiData;
+                break;
+            }
+            case TYPE_SNEED:
+            {
+                if (uiData == DONE)
+                    DoUseDoorOrButton(m_uiMastRoomDoorGUID);
+
+                m_auiEncounter[2] = uiData;
+                break;
+            }
+            case TYPE_GILNID:
+            {
+                if (uiData == DONE)
+                    DoUseDoorOrButton(m_uiFoundryDoorGUID);
+
+                m_auiEncounter[3] = uiData;
                 break;
             }
             case TYPE_DEFIAS_ENDDOOR:
@@ -122,6 +168,10 @@ struct MANGOS_DLL_DECL instance_deadmines : public ScriptedInstance
                 return m_auiEncounter[0];
             case TYPE_RHAHKZOR:
                 return m_auiEncounter[1];
+            case TYPE_SNEED:
+                return m_auiEncounter[2];
+            case TYPE_GILNID:
+                return m_auiEncounter[3];
         }
 
         return 0;
@@ -129,8 +179,13 @@ struct MANGOS_DLL_DECL instance_deadmines : public ScriptedInstance
 
     uint64 GetData64(uint32 uiData)
     {
-        if (uiData == DATA_DEFIAS_DOOR)
-            return m_uiIronCladGUID;
+        switch(uiData)
+        {
+            case GO_IRON_CLAD_DOOR:
+                return m_uiIronCladGUID;
+            case GO_SMITE_CHEST:
+                return m_uiSmiteChestGUID;
+        }
 
         return 0;
     }
@@ -151,13 +206,27 @@ struct MANGOS_DLL_DECL instance_deadmines : public ScriptedInstance
                             ++m_uiDoor_Step;
                             break;
                         case 1:
-                            if (Creature* pi1 = pMrSmite->SummonCreature(NPC_PIRATE, 93.68f, -678.63f, 7.71f, 2.09f, TEMPSUMMON_TIMED_OR_DEAD_DESPAWN, 1800000))
-                                pi1->GetMotionMaster()->MovePoint(0, 100.11f, -670.65f, 7.42f);
-                            if (Creature* pi2 = pMrSmite->SummonCreature(NPC_PIRATE, 102.63f, -685.07f, 7.42f, 1.28f, TEMPSUMMON_TIMED_OR_DEAD_DESPAWN, 1800000))
-                                pi2->GetMotionMaster()->MovePoint(0, 100.11f, -670.65f, 7.42f);
+                        {
+                            if (GameObject* pDoor = instance->GetGameObject(m_uiIronCladGUID))
+                            {
+                                // should be static spawns, fetch the closest ones at the pier
+                                if (Creature* pi1 = GetClosestCreatureWithEntry(pDoor, NPC_PIRATE, 40.0f))
+                                {
+                                    pi1->RemoveSplineFlag(SPLINEFLAG_WALKMODE);
+                                    pi1->GetMotionMaster()->MovePoint(0, pDoor->GetPositionX(), pDoor->GetPositionY(), pDoor->GetPositionZ());
+                                }
+
+                                if (Creature* pi2 = GetClosestCreatureWithEntry(pDoor, NPC_SQUALLSHAPER, 40.0f))
+                                {
+                                    pi2->RemoveSplineFlag(SPLINEFLAG_WALKMODE);
+                                    pi2->GetMotionMaster()->MovePoint(0, pDoor->GetPositionX(), pDoor->GetPositionY(), pDoor->GetPositionZ());
+                                }
+                            }
+
                             ++m_uiDoor_Step;
                             m_uiIronDoor_Timer = 10000;
                             break;
+                        }
                         case 2:
                             DoScriptText(INST_SAY_ALARM2,pMrSmite);
                             m_uiDoor_Step = 0;
